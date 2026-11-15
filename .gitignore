@@ -18,6 +18,7 @@ venv
 uploads
 output/
 docker*
+__pycache__/
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -28,3 +29,7 @@ docker*
 *.njsproj
 *.sln
 *.sw?
+
+# Local-only scripts
+run_all.py
+create_admin.py

@@ -1,31 +1,35 @@
-import { Download, Eye, Trash2, FileText, Clock, HardDrive } from 'lucide-react'
+import { Download, Eye, Trash2, FileText, File, FileType, Clock, HardDrive, CheckCircle } from 'lucide-react'
 import { useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import toast from 'react-hot-toast'
 import { removeFile, downloadFile } from '../../../shared/utils/storage'
 import PDFViewer from './PDFViewerView'
 
+const getExt = (file) => {
+  const fromName = file.name?.split('.').pop()?.toUpperCase()
+  if (['PDF', 'DOCX', 'TXT'].includes(fromName)) return fromName
+  if (file.type === 'application/pdf') return 'PDF'
+  if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return 'DOCX'
+  return 'TXT'
+}
+
+const TYPE_BADGE = {
+  PDF: 'bg-orange-100 text-orange-800 dark:bg-orange-500/10 dark:text-orange-500',
+  DOCX: 'bg-blue-100 text-blue-800 dark:bg-blue-500/10 dark:text-blue-500',
+  TXT: 'bg-gray-100 text-gray-800 dark:bg-gray-500/10 dark:text-gray-500',
+}
+
+const BADGE_BASE = 'text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md'
+
+function TypeIcon({ ext }) {
+  if (ext === 'PDF') return <FileText size={20} className="text-orange-500" />
+  if (ext === 'DOCX') return <File size={20} className="text-blue-500" />
+  return <FileType size={20} className="text-gray-500 dark:text-gray-400" />
+}
+
 export default function DocumentFiles({ files, isDark, onFileDeleted }) {
-  const [hoveredCard, setHoveredCard] = useState(null)
-  const [selectedFile, setSelectedFile] = useState(null) 
-  
+  const [selectedFile, setSelectedFile] = useState(null)
 
-  const getFileIcon = (type) => {
-    if (type === 'application/pdf') return FileText
-    if (type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return FileText
-    if (type === 'text/plain') return FileText
-    return FileText
-  }
-
-  const getColorScheme = (type) => {
-    const schemes = {
-      'application/pdf': { bg: 'bg-red-100 dark:bg-red-900/30', text: 'text-red-700 dark:text-red-400', label: 'PDF' },
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': { bg: 'bg-blue-100 dark:bg-blue-900/30', text: 'text-blue-700 dark:text-blue-400', label: 'DOCX' },
-      'text/plain': { bg: 'bg-cyan-100 dark:bg-cyan-900/30', text: 'text-cyan-700 dark:text-cyan-400', label: 'TXT' },
-    }
-    return schemes[type] || schemes['application/pdf']
-  }
-
-  // Formate date
   const formatDate = (dateString) => {
     const date = new Date(dateString)
     return date.toLocaleDateString('en-US', {
@@ -35,7 +39,6 @@ export default function DocumentFiles({ files, isDark, onFileDeleted }) {
     })
   }
 
-  // Format file size
   const formatSize = (size) => {
     if (typeof size === 'string') {
       return size + ' MB'
@@ -43,13 +46,11 @@ export default function DocumentFiles({ files, isDark, onFileDeleted }) {
     return size > 1024 ? (size / 1024).toFixed(1) + ' MB' : size + ' KB'
   }
 
-  // Handle view file modal
   const handleView = (file) => {
     setSelectedFile(file)
     toast.success('Opening file...')
   }
 
-  // Handle download file
   const handleDownload = (file) => {
     try {
       downloadFile(file)
@@ -60,11 +61,9 @@ export default function DocumentFiles({ files, isDark, onFileDeleted }) {
     }
   }
 
-  // Handle delete file
   const handleDelete = (file) => {
-    
     if (file.isDummy) {
-      toast.error('Cannot delete sample files') // Sample files cannot be deleted
+      toast.error('Cannot delete sample files')
       return
     }
 
@@ -82,15 +81,14 @@ export default function DocumentFiles({ files, isDark, onFileDeleted }) {
     }
   }
 
-  // Empty state
   if (files.length === 0) {
     return (
-      <div className={`text-center py-12 rounded-xl ${isDark ? 'bg-slate-800/50 border border-slate-700' : 'bg-slate-50 border border-slate-200'}`}>
-        <FileText className={`w-12 h-12 mx-auto mb-4 ${isDark ? 'text-slate-600' : 'text-slate-400'}`} />
-        <p className={`text-lg font-semibold ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+      <div className="text-center py-12 rounded-2xl bg-white dark:bg-[#111111] border border-gray-200 dark:border-[#1f1f1f]">
+        <FileText className="w-12 h-12 mx-auto mb-4 text-gray-400 dark:text-gray-600" />
+        <p className="text-lg font-semibold text-gray-900 dark:text-white">
           No documents uploaded yet
         </p>
-        <p className={`text-sm ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+        <p className="text-sm text-gray-500 dark:text-gray-400">
           Upload your first legal document to get started
         </p>
       </div>
@@ -99,85 +97,97 @@ export default function DocumentFiles({ files, isDark, onFileDeleted }) {
 
   return (
     <>
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {files.map((file) => {
-          const IconComponent = getFileIcon(file.type)
-          const colorScheme = getColorScheme(file.type)
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <AnimatePresence>
+          {files.map((file, i) => {
+            const ext = getExt(file)
+            const analyzed = file.status === 'COMPLETED' || file.analyzed
 
-          return (
-            <div
-              key={file.id}
-              onMouseEnter={() => setHoveredCard(file.id)}
-              onMouseLeave={() => setHoveredCard(null)}
-              className={`${isDark ? 'bg-slate-800 border border-slate-700 hover:border-blue-600' : 'bg-white border border-slate-200 hover:border-blue-400'} rounded-xl p-6 transition-all duration-200 hover:shadow-lg`}
-            >
-              <div className="flex items-start justify-between mb-4">
-                <div className={`p-3 rounded-lg ${colorScheme.bg}`}>
-                  <IconComponent className={`w-6 h-6 ${colorScheme.text}`} />
-                </div>
-                
-                {hoveredCard === file.id && (
-                  <div className="flex gap-2">
+            return (
+              <motion.div
+                key={file.id}
+                layout
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                transition={{ delay: i * 0.03 }}
+                className="bg-white dark:bg-[#161616] rounded-2xl p-6 border border-gray-200 dark:border-[#1f1f1f] hover:border-orange-500/40 transition-colors cursor-pointer group relative"
+              >
+                <div className="flex items-start justify-between mb-3">
+                  <div className="w-10 h-10 rounded-xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center">
+                    <TypeIcon ext={ext} />
+                  </div>
+
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                       onClick={() => handleView(file)}
-                      className={`p-2 rounded-lg transition-all ${isDark ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-100 hover:bg-slate-200'}`}
+                      className="p-1.5 rounded-lg bg-orange-500/10 text-orange-500 hover:bg-orange-500/20"
                       title="View"
                     >
-                      <Eye className={`w-4 h-4 ${isDark ? 'text-slate-300' : 'text-slate-600'}`} />
+                      <Eye size={14} />
                     </button>
                     <button
                       onClick={() => handleDownload(file)}
-                      className={`p-2 rounded-lg transition-all ${isDark ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-100 hover:bg-slate-200'}`}
+                      className="p-1.5 rounded-lg bg-orange-500/10 text-orange-500 hover:bg-orange-500/20"
                       title="Download"
                     >
-                      <Download className={`w-4 h-4 ${isDark ? 'text-slate-300' : 'text-slate-600'}`} />
+                      <Download size={14} />
                     </button>
                     {!file.isDummy && (
                       <button
                         onClick={() => handleDelete(file)}
-                        className="p-2 rounded-lg transition-all bg-red-500/20 hover:bg-red-500/30"
+                        className="p-1.5 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20"
                         title="Delete"
                       >
-                        <Trash2 className="w-4 h-4 text-red-600 dark:text-red-400" />
+                        <Trash2 size={14} />
                       </button>
                     )}
                   </div>
-                )}
-              </div>
+                </div>
 
-              <div className={`inline-block px-3 py-1 rounded-full text-xs font-semibold mb-3 ${colorScheme.bg} ${colorScheme.text}`}>
-                {colorScheme.label}
-              </div>
+                <h3 className="text-gray-900 dark:text-white font-bold text-base truncate">
+                  {file.name?.replace(/\.[^.]+$/, '')}
+                </h3>
 
-              <h3 className={`font-semibold text-sm mb-3 line-clamp-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                {file.name}
-              </h3>
-              <div className="space-y-2 text-xs mb-3">
-                <div className={`flex items-center gap-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                  <Clock className="w-4 h-4" />
-                  <span>{formatDate(file.uploadedAt)}</span>
+                <div className="flex items-center gap-2 mt-3">
+                  <span className={`${BADGE_BASE} ${TYPE_BADGE[ext] || TYPE_BADGE.TXT}`}>{ext}</span>
+                  {file.status !== undefined && (
+                    analyzed ? (
+                      <span className={`${BADGE_BASE} flex items-center gap-1 bg-green-500/10 text-green-600 dark:text-green-500`}>
+                        <CheckCircle size={11} /> Analyzed
+                      </span>
+                    ) : (
+                      <span className={`${BADGE_BASE} flex items-center gap-1 bg-yellow-500/10 text-yellow-600 dark:text-yellow-500`}>
+                        <Clock size={11} /> Queued
+                      </span>
+                    )
+                  )}
+                  {file.isDummy && (
+                    <span className={`${BADGE_BASE} bg-gray-100 text-gray-800 dark:bg-gray-500/10 dark:text-gray-500`}>Sample</span>
+                  )}
                 </div>
-                <div className={`flex items-center gap-2 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                  <HardDrive className="w-4 h-4" />
-                  <span>{formatSize(file.size)}</span>
+
+                <div className="space-y-2 text-xs mt-4 text-gray-500 dark:text-gray-400">
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4" />
+                    <span>{formatDate(file.uploadedAt)}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <HardDrive className="w-4 h-4" />
+                    <span>{formatSize(file.size)}</span>
+                  </div>
                 </div>
-              </div>
-              {file.isDummy && (
-                <div className={`px-2 py-1 rounded text-xs font-medium ${colorScheme.bg} ${colorScheme.text}`}>
-                  Sample File
-                </div>
-              )}
-            </div>
-          )
-        })}
+              </motion.div>
+            )
+          })}
+        </AnimatePresence>
       </div>
 
-      {/* PDF Viewer Modal */}
       {selectedFile && (
-        <PDFViewer 
-          file={selectedFile} 
-          isDark={isDark} 
-          onClose={() => setSelectedFile(null)} 
+        <PDFViewer
+          file={selectedFile}
+          isDark={isDark}
+          onClose={() => setSelectedFile(null)}
         />
       )}
     </>

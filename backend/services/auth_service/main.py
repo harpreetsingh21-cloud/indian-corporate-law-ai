@@ -13,6 +13,7 @@ from pythonjsonlogger import jsonlogger
 from shared.config.settings import get_settings
 from shared.database.mongo import DatabaseManager
 from services.auth_service.router import router
+from services.auth_service.payment_router import router as payment_router
 
 
 def setup_logging():
@@ -53,6 +54,7 @@ def create_app() -> FastAPI:
                        allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
     app.add_middleware(RequestIDMiddleware)
     app.include_router(router)
+    app.include_router(payment_router)
 
     @app.get("/health", tags=["infra"])
     async def health():

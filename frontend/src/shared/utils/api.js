@@ -93,6 +93,17 @@ export const authAPI = {
       headers: authH(), 
       body: JSON.stringify(data) 
     }).then(handleRes),
+
+  createOrder: () => 
+    fetch(`${API}/api/auth/payment/create-order`, { 
+      method: 'POST', 
+      headers: { 'Content-Type': 'application/json', ...authH() } 
+    }).then(handleRes),
+
+  paymentStatus: (orderId) => 
+    fetch(`${API}/api/auth/payment/status/${orderId}`, { 
+      headers: { ...authH() } 
+    }).then(handleRes),
 }
 
 export const adminAPI = {

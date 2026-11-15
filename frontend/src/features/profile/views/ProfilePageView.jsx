@@ -1,12 +1,14 @@
+import UpgradeButton from './UpgradeButton'
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { 
-  User, Mail, Building, Briefcase, Target, Shield, Check, 
+import {
+  User, Mail, Building, Briefcase, Target, Shield, Check,
   Loader2, Sparkles, ShieldCheck, Clock, ArrowRight, Save
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '../../auth/models/authStore'
 import { authAPI } from '../../../shared/utils/api'
+
 
 const IT_ROLES = [
   "IT Corporate Legal Counsel",
@@ -94,7 +96,7 @@ export default function ProfilePageView() {
 
   return (
     <div className="p-6 md:p-8 max-w-6xl mx-auto space-y-8 animate-in fade-in font-poppins pb-16">
-      
+
       {/* Header */}
       <motion.div {...fadeItem(0)}>
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -110,10 +112,10 @@ export default function ProfilePageView() {
       </motion.div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
+
         {/* ── Left Column: Profile Card & Usage Quota ── */}
         <div className="space-y-6">
-          
+
           {/* User Overview Card */}
           <motion.div {...fadeItem(1)} className="bg-white/60 dark:bg-neutral-900/60 backdrop-blur-md border border-gray-200 dark:border-neutral-800 rounded-3xl p-6 shadow-sm">
             <div className="flex flex-col items-center text-center">
@@ -126,7 +128,7 @@ export default function ProfilePageView() {
               <p className="text-xs text-gray-500 dark:text-gray-400 font-poppins mt-0.5 mb-3">
                 {user?.email}
               </p>
-              
+
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold font-outfit mb-4 capitalize">
                 {isAdmin ? (
                   <span className="bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 px-3 py-1 rounded-full flex items-center gap-1.5">
@@ -183,9 +185,8 @@ export default function ProfilePageView() {
 
                 <div className="h-2 w-full bg-gray-200 dark:bg-neutral-800 rounded-full overflow-hidden">
                   <div
-                    className={`h-full transition-all duration-500 ease-out ${
-                      usedUploads >= maxUploads ? 'bg-red-500' : 'bg-orange-500'
-                    }`}
+                    className={`h-full transition-all duration-500 ease-out ${usedUploads >= maxUploads ? 'bg-red-500' : 'bg-orange-500'
+                      }`}
                     style={{ width: `${percentUsed}%` }}
                   />
                 </div>
@@ -200,6 +201,8 @@ export default function ProfilePageView() {
                     You have reached the daily 5-document limit. Uploads reset at midnight UTC, or ask your administrator to reset your quota.
                   </div>
                 )}
+
+                <UpgradeButton />
               </div>
             )}
           </motion.div>
@@ -217,7 +220,7 @@ export default function ProfilePageView() {
             </p>
 
             <form onSubmit={handleSave} className="space-y-5">
-              
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 {/* Full Name */}
                 <div className="flex flex-col gap-1.5">
@@ -346,4 +349,3 @@ export default function ProfilePageView() {
     </div>
   )
 }
-
