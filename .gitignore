@@ -33,3 +33,4 @@ __pycache__/
 # Local-only scripts
 run_all.py
 create_admin.py
+start_all.ps1
