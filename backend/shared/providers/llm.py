@@ -26,7 +26,8 @@ class OllamaProvider:
                 messages=[{"role": "user", "content": prompt}],
                 stream=False,
                 options={
-                    "num_predict":    1500,
+                    "num_predict":    4096,
+                    "num_ctx":        8192,
                     "temperature":    0.15,
                     "top_k":          30,
                     "top_p":          0.90,
