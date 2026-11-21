@@ -2,6 +2,7 @@ import re
 import json
 import logging
 from typing import Optional
+from services.rag_service.analysis.risk_rubric import findings_for_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +109,7 @@ def _classify_document(text: str) -> str:
     return "non_legal"
 
 
-def build_prompt(doc_full: str, local_context: str, law_context: str, doc_type: str) -> str:
+def build_prompt(doc_full: str, local_context: str, law_context: str, doc_type: str, risk_assessment: Optional[dict] = None) -> str:
     clause_instruction = f"""
 KNOWN IT & CORPORATE CLAUSE TYPES (check which ones are PRESENT in the document):
 {_CLAUSE_NAMES_LIST}
@@ -139,9 +140,9 @@ You MUST analyze every section of this document thoroughly with specific focus o
 3. OBLIGATIONS — list ALL concrete technical and legal duties of EACH party (aim for 5-8 items):
    Be specific: e.g., "Vendor must maintain 99.9% monthly availability and report P1 severity bugs within 1 hour", not generic statements.
 
-4. RISKS — identify REAL technology, operational, and legal risks (aim for 4-6 items):
-   Analyze: uncapped data breach liabilities, missing source code escrow, lack of CERT-In/DPDP compliance, ambiguous uptime calculation, one-sided termination, or loss of software IP rights.
-   Cite specific clauses or their absence as the source of risk.
+4. CRITICAL RISKS — explain the GAP and PARTIAL items of the RULE-BASED RISK CHECKLIST below:
+   Do not change those results and do not give your own risk score.
+   For each item, explain the practical and legal impact for the IT stakeholders and cite the law given.
 
 5. COMPLIANCE — detailed IT legal compliance analysis:
    - How does this document align with Indian IT Act 2000/2008 (Sec 43A, 72A, 79)?
@@ -164,7 +165,7 @@ Analyze this document for Information Technology department relevance, commitmen
 
 2. CLAUSES — list any terms, conditions, or IT commitments. If none, write: []
 3. OBLIGATIONS — duties or action items mentioned for tech personnel or vendors. If none, write: []
-4. RISKS — practical, cyber, or legal concerns with this document. If none, write: []
+4. CRITICAL RISKS — explain the GAP and PARTIAL items of the RULE-BASED RISK CHECKLIST below. Do not give your own risk score.
 5. COMPLIANCE — relevant Indian IT laws (IT Act, DPDP, CERT-In, Copyright) if applicable.
 """
 
@@ -189,6 +190,10 @@ RETRIEVED STATUTORY CONTEXT:
 {'=' * 60}
 DOCUMENT TO ANALYZE (full text excerpt):
 {local_context or doc_full[:2500]}
+
+{'=' * 60}
+RULE-BASED RISK CHECKLIST (computed from the full document; authoritative, do not change):
+{findings_for_prompt(risk_assessment) if risk_assessment else "(not available)"}
 
 {'=' * 60}
 {clause_instruction}
@@ -220,19 +225,30 @@ EXACT JSON SCHEMA TO FOLLOW:
     "<Party Name: specific IT/legal obligation with timeline/milestone>",
     "..."
   ],
-  "risks": [
-    "<Specific IT legal or operational risk description — cite the clause or its omission>",
-    "..."
-  ],
-  "risk_score": <Integer from 0 to 100 representing the overall corporate legal and contractual risk severity of this document>,
-  "critical_risks": "<Detailed paragraph explaining the highest corporate legal and contractual risks for IT stakeholders (e.g. employment bond lock-in & penalty enforceability under Indian Contract Act Sec 27, notice period restrictions, uncapped breach liability, missing source code escrow, SLA outage penalty gaps, DPDP non-compliance, software IP loss).>",
+  "critical_risks": "<Detailed paragraph explaining the GAP and PARTIAL items of the rule-based risk checklist, their practical impact for IT stakeholders, and the law cited for each.>",
   "compliance": "<Detailed paragraph: compliance with Indian IT Act 2000, Indian Contract Act 1872, DPDP Act 2023, and Companies Act 2013 IT corporate governance requirements.>"
 }}
 
 OUTPUT ONLY THE JSON. START WITH {{ END WITH }}"""
 
 
-def _parse_response(raw: str, doc_type: str) -> dict:
+def _parse_response(raw: str, doc_type: str, risk_assessment: Optional[dict] = None) -> dict:
+    return _apply_risk(_parse_llm(raw, doc_type), risk_assessment)
+
+
+def _apply_risk(result: dict, risk_assessment: Optional[dict]) -> dict:
+    if not risk_assessment:
+        return result
+    result["risk_score"] = risk_assessment["risk_score"]
+    result["risk_band"] = risk_assessment["risk_band"]
+    result["risks"] = risk_assessment["risks"][:20]
+    result["risk_checklist"] = risk_assessment["risk_checklist"]
+    result["red_flags"] = risk_assessment["red_flags"]
+    result["rubric_version"] = risk_assessment["rubric_version"]
+    return result
+
+
+def _parse_llm(raw: str, doc_type: str) -> dict:
     if not raw:
         return _fallback("LLM returned empty response")
 

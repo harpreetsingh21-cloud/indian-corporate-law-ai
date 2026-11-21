@@ -4,6 +4,7 @@ from shared.providers.embedding import SentenceTransformerProvider
 from shared.providers.vector_store import FAISSVectorStore, LocalFAISSVectorStore
 from shared.config.settings import get_settings
 from services.rag_service.analysis.prompts import build_prompt, _classify_document, _parse_response
+from services.rag_service.analysis.risk_rubric import assess_risk
 from services.rag_service.extraction import extract_text
 
 logger = logging.getLogger(__name__)
@@ -110,6 +111,9 @@ async def run_analysis(filepath: str, filename: str, progress_callback=None) -> 
     doc_type = _classify_document(text)
     logger.info(f"[TYPE] Document classified as: {doc_type}")
 
+    risk = assess_risk(text)
+    logger.info(f"[RISK] Rule-based score {risk['risk_score']}/100 ({risk['risk_band']}), {len(risk['risks'])} findings")
+
     logger.info("[STEP 1/4] Building local document context...")
     await _notify("CHUNKING")
     local_ctx = _local_context(text, top_k=settings.TOP_K_LOCAL, max_chars=settings.CONTEXT_MAX_CHARS)
@@ -126,7 +130,7 @@ async def run_analysis(filepath: str, filename: str, progress_callback=None) -> 
 
     await _notify("INDEXING")
     logger.info("[STEP 3/4] Building IT corporate legal analysis prompt...")
-    prompt = build_prompt(doc_full=text[:3000], local_context=local_ctx, law_context=law_ctx, doc_type=doc_type)
+    prompt = build_prompt(doc_full=text[:3000], local_context=local_ctx, law_context=law_ctx, doc_type=doc_type, risk_assessment=risk)
 
     await _notify("ANALYZING")
     logger.info("[STEP 4/4] Calling LLM...")
@@ -136,5 +140,5 @@ async def run_analysis(filepath: str, filename: str, progress_callback=None) -> 
     if raw is None:
         return {"error": "LLM timed out or returned empty response"}
 
-    result = _parse_response(raw, doc_type)
+    result = _parse_response(raw, doc_type, risk)
     return result

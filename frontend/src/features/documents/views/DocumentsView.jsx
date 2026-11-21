@@ -369,8 +369,8 @@ export default function DocumentsView() {
       return
     }
     const name = file.name.toLowerCase()
-    if (!name.endsWith('.pdf') && !name.endsWith('.doc') && !name.endsWith('.docx')) {
-      toast.error('Only PDF and Word (.doc/.docx) files are allowed.')
+    if (!name.endsWith('.pdf') && !name.endsWith('.doc') && !name.endsWith('.docx') && !name.endsWith('.txt')) {
+      toast.error('Only PDF, Word (.doc/.docx) and TXT files are allowed.')
       return
     }
     if (file.size > 5 * 1024 * 1024) {
@@ -475,7 +475,7 @@ export default function DocumentsView() {
                 onDrop={handleDrop}
                 onClick={() => !uploading && inputRef.current?.click()}
               >
-                <input ref={inputRef} type="file" accept=".pdf,.doc,.docx" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handleUpload(e.target.files[0]); e.target.value = '' }} disabled={uploading} />
+                <input ref={inputRef} type="file" accept=".pdf,.doc,.docx,.txt" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handleUpload(e.target.files[0]); e.target.value = '' }} disabled={uploading} />
                 {uploading ? (
                   <div className="flex items-center justify-center gap-3">
                     <Loader2 className="w-5 h-5 animate-spin text-orange-500" />
@@ -503,7 +503,7 @@ export default function DocumentsView() {
                     <Upload className="w-5 h-5 text-orange-500" />
                     <span className="text-sm font-semibold text-gray-900 dark:text-white">Drop file or click to upload</span>
                     <span className="text-xs text-gray-500 dark:text-gray-400">
-                      PDF, DOCX, DOC · {isAdmin ? 'Unlimited uploads' : `${5 - docsUsedToday} upload(s) left`}
+                      PDF, DOCX, DOC, TXT · {isAdmin ? 'Unlimited uploads' : `${5 - docsUsedToday} upload(s) left`}
                     </span>
                   </div>
                 )}

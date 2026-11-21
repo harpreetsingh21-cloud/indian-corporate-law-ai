@@ -45,12 +45,12 @@ export default function Dashboard() {
 
   const isAdmin = user?.role === 'admin'
 
-  useEffect(() => { 
-    documentAPI.list().then((r) => setFiles(r.documents || [])).catch(() => {}) 
+  useEffect(() => {
+    documentAPI.list().then((r) => setFiles(r.documents || [])).catch(() => { })
   }, [])
 
-  const done = files.filter((f) => ['done', 'completed'].includes(f.status)).length
-  const processing = files.filter((f) => ['processing', 'uploaded', 'queued', 'extracting', 'chunking', 'embedding', 'indexing', 'analyzing'].includes(f.status)).length
+  const done = files.filter((f) => ['done', 'completed'].includes((f.status || '').toLowerCase())).length
+  const processing = files.filter((f) => ['processing', 'uploaded', 'queued', 'extracting', 'chunking', 'embedding', 'indexing', 'analyzing'].includes((f.status || '').toLowerCase())).length
   const recent = files.slice(0, 6)
 
   const handleFile = async (file) => {
@@ -59,14 +59,14 @@ export default function Dashboard() {
     const tid = toast.loading(`Uploading ${file.name}…`)
     try {
       const res = await documentAPI.upload(file)
-      try { await summarizeAPI.trigger(res.doc_id) } catch {}
+      try { await summarizeAPI.trigger(res.doc_id) } catch { }
       toast.success('Uploaded successfully!', { id: tid })
       const updated = await documentAPI.list()
       setFiles(updated.documents || [])
-    } catch (err) { 
-      toast.error(err.message, { id: tid }) 
-    } finally { 
-      setUploading(false) 
+    } catch (err) {
+      toast.error(err.message, { id: tid })
+    } finally {
+      setUploading(false)
     }
   }
 
@@ -76,7 +76,7 @@ export default function Dashboard() {
 
   return (
     <div className="relative w-full min-h-full overflow-hidden bg-transparent">
-      
+
       {/* ── Ambient Orbs ── */}
       <div className="absolute rounded-full pointer-events-none blur-[80px] bg-orange-500 w-[500px] h-[500px] -top-20 -right-20 opacity-10 dark:opacity-5 z-0" />
       <div className="absolute rounded-full pointer-events-none blur-[80px] bg-orange-500 w-[400px] h-[400px] bottom-0 -left-20 opacity-10 dark:opacity-[3%] z-0" />
@@ -121,7 +121,7 @@ export default function Dashboard() {
               className={`border-2 border-dashed rounded-2xl p-8 text-center flex flex-col items-center justify-center gap-4 transition-all duration-200 bg-white/40 dark:bg-neutral-950/40 ${dragging ? 'border-orange-500 bg-orange-500/10' : 'border-gray-300 dark:border-neutral-700 hover:border-orange-500 hover:bg-orange-500/5'} ${uploading ? 'cursor-not-allowed' : 'cursor-pointer'}`}
               onDragOver={(e) => { e.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)} onDrop={onDrop} onClick={() => !uploading && inputRef.current?.click()}
             >
-              <input ref={inputRef} type="file" className="hidden" onChange={(e) => handleFile(e.target.files[0])} disabled={uploading} accept=".pdf,.doc,.docx" />
+              <input ref={inputRef} type="file" className="hidden" onChange={(e) => handleFile(e.target.files[0])} disabled={uploading} accept=".pdf,.doc,.docx,.txt" />
               {uploading ? (
                 <div className="flex flex-col items-center gap-3">
                   <Loader2 size={32} className="animate-spin text-orange-500" />
@@ -144,27 +144,27 @@ export default function Dashboard() {
                 <button onClick={() => setPage('documents')} className="text-orange-500 text-xs font-bold font-outfit hover:underline underline-offset-2">View all</button>
               </div>
               <div className="flex flex-col gap-2.5">
-                 {recent.map(doc => (
-                   <div key={doc.doc_id} className="bg-white/80 dark:bg-black/60 border border-gray-200 dark:border-neutral-800 rounded-xl p-3 flex items-center gap-3 cursor-pointer hover:border-orange-500/50 hover:shadow-sm transition-all" onClick={() => setPage('documents')}>
-                      <FileText size={16} className="text-orange-500 shrink-0" />
-                      <span className="text-sm font-semibold text-gray-900 dark:text-white truncate font-outfit">{doc.filename}</span>
-                   </div>
-                 ))}
+                {recent.map(doc => (
+                  <div key={doc.doc_id} className="bg-white/80 dark:bg-black/60 border border-gray-200 dark:border-neutral-800 rounded-xl p-3 flex items-center gap-3 cursor-pointer hover:border-orange-500/50 hover:shadow-sm transition-all" onClick={() => setPage('documents')}>
+                    <FileText size={16} className="text-orange-500 shrink-0" />
+                    <span className="text-sm font-semibold text-gray-900 dark:text-white truncate font-outfit">{doc.filename}</span>
+                  </div>
+                ))}
               </div>
             </motion.div>
           )}
 
-          <FeatureCard 
-            icon={Terminal} 
-            title="IT Act 2000 & DPDP Act 2023" 
-            desc="Statutory framework for digital contracts, data fiduciary compliance, CERT-In reporting & cyber governance." 
-            delay={6} 
+          <FeatureCard
+            icon={Terminal}
+            title="IT Act 2000 & DPDP Act 2023"
+            desc="Statutory framework for digital contracts, data fiduciary compliance, CERT-In reporting & cyber governance."
+            delay={6}
           />
-          <FeatureCard 
-            icon={FileCode2} 
-            title="Tech Clauses & 99.9% SLA" 
-            desc="Instant analysis of uptime, latency, source code escrow, software license scope, and developer IP work-for-hire." 
-            delay={7} 
+          <FeatureCard
+            icon={FileCode2}
+            title="Tech Clauses & 99.9% SLA"
+            desc="Instant analysis of uptime, latency, source code escrow, software license scope, and developer IP work-for-hire."
+            delay={7}
           />
         </div>
       </div>

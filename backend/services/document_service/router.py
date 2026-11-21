@@ -25,8 +25,8 @@ def _auth(authorization: Optional[str]) -> str:
 
 async def _handle_upload(file: UploadFile, authorization: Optional[str]) -> dict:
     name = file.filename.lower()
-    if not (name.endswith(".pdf") or name.endswith(".doc") or name.endswith(".docx")):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only PDF and Word (.doc/.docx) files are allowed.")
+    if not (name.endswith(".pdf") or name.endswith(".doc") or name.endswith(".docx") or name.endswith(".txt")):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only PDF, Word (.doc/.docx) and TXT files are allowed.")
         
     user_id = _auth(authorization)
     user = await UserRepository.find_user_by_id(user_id)

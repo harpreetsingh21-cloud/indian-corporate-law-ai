@@ -45,6 +45,8 @@ def _resolve_upstream(path: str) -> str:
     """Determine which upstream service to proxy the request to."""
     if path.startswith("/api/auth"):
         return AUTH_SVC
+    if path.startswith("/api/documents/") and path.endswith("/cancel"):
+        return RAG_SVC
     if path.startswith("/api/documents"):
         return DOCUMENT_SVC
     if path.startswith("/summarize") or path.startswith("/result") or path.startswith("/api/summarize"):
@@ -82,14 +84,8 @@ def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title="LegalBuddy — API Gateway", version=settings.APP_VERSION, lifespan=lifespan)
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.CORS_ORIGINS,
-        allow_origin_regex=r"https?://.*\.vercel\.app|https?://.*\.trycloudflare\.com|https?://.*\.pages\.dev|https?://.*\.pankajbisht\.dev",
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    app.add_middleware(CORSMiddleware, allow_origins=settings.CORS_ORIGINS,
+                       allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
     app.add_middleware(RequestIDMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
 
@@ -113,7 +109,7 @@ def create_app() -> FastAPI:
     async def root():
         return {"message": "LegalBuddy API Gateway", "docs": "/docs"}
 
-    @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+    @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
     async def proxy(request: Request, path: str):
         full_path = "/" + path
         upstream = _resolve_upstream(full_path)

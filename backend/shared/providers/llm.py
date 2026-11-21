@@ -28,7 +28,8 @@ class OllamaProvider:
                 options={
                     "num_predict":    4096,
                     "num_ctx":        8192,
-                    "temperature":    0.15,
+                    "temperature":    0,
+                    "seed":           42,
                     "top_k":          30,
                     "top_p":          0.90,
                     "repeat_penalty": 1.15,

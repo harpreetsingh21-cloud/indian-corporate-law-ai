@@ -2,7 +2,7 @@ import os
 import re
 from typing import Protocol
 from pathlib import Path
-
+import uuid
 class DocumentStorage(Protocol):
     async def save_document(self, user_id: str, username: str, filename: str, content: bytes) -> str:
         ...
@@ -33,6 +33,8 @@ class LocalDocumentStorage:
         upload_dir = self._get_upload_dir(username, user_id)
         Path(upload_dir).mkdir(parents=True, exist_ok=True)
         safe_name = self._sanitize_filename(filename)
+        name, ext = os.path.splitext(safe_name)
+        safe_name = f"{name}__{uuid.uuid4().hex[:8]}{ext}"
         filepath = os.path.join(upload_dir, safe_name)
         with open(filepath, "wb") as fh:
             fh.write(content)
