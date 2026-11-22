@@ -32,7 +32,7 @@ def _resolve_filepath(filepath: str) -> str:
     return filepath
 
 
-async def _trigger(doc_id: str, authorization: Optional[str], background_tasks: BackgroundTasks) -> dict:
+async def _trigger(doc_id: str, authorization: Optional[str], background_tasks: BackgroundTasks, force: bool = False) -> dict:
     user_id = _auth(authorization)
     doc = await DocumentRepository.get_document(doc_id)
     if not doc or str(doc["user_id"]) != user_id:
@@ -48,24 +48,24 @@ async def _trigger(doc_id: str, authorization: Optional[str], background_tasks: 
     if current_status in active_statuses:
         return {"doc_id": doc_id, "status": current_status, "message": "Already processing"}
 
-    if current_status == "COMPLETED" and doc.get("result"):
+    if current_status == "COMPLETED" and doc.get("result") and not force:
         return {"doc_id": doc_id, "status": "COMPLETED", "message": "Analysis already complete", **_format_result(doc["result"])}
 
     background_tasks.add_task(_async_process_document, user_id, doc_id, filepath, doc["filename"])
     await DocumentRepository.update_document_status(doc_id, "QUEUED")
-    logger.info(f"[OK] doc_id={doc_id} -> QUEUED")
+    logger.info(f"[OK] doc_id={doc_id} -> QUEUED{' (re-analysis)' if force else ''}")
     return {"doc_id": doc_id, "status": "QUEUED", "message": "Analysis queued"}
 
 
 @router.post("/summarize/{doc_id}")
-async def trigger_analysis(doc_id: str, background_tasks: BackgroundTasks, authorization: Optional[str] = Header(None)):
+async def trigger_analysis(doc_id: str, background_tasks: BackgroundTasks, force: bool = False, authorization: Optional[str] = Header(None)):
     """Trigger RAG analysis. Returns immediately; poll GET /result/{doc_id}."""
-    return await _trigger(doc_id, authorization, background_tasks)
+    return await _trigger(doc_id, authorization, background_tasks, force)
 
 
 @router.post("/api/summarize/{doc_id}")
-async def trigger_analysis_compat(doc_id: str, background_tasks: BackgroundTasks, authorization: Optional[str] = Header(None)):
-    return await _trigger(doc_id, authorization, background_tasks)
+async def trigger_analysis_compat(doc_id: str, background_tasks: BackgroundTasks, force: bool = False, authorization: Optional[str] = Header(None)):
+    return await _trigger(doc_id, authorization, background_tasks, force)
 
 
 @router.get("/result/{doc_id}")

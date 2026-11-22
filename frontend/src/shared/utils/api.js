@@ -135,7 +135,7 @@ export const documentAPI = {
 }
 
 export const summarizeAPI = {
-  trigger: (docId) => req(`/summarize/${docId}`, { method: 'POST' }),
+  trigger: (docId, force = false) => req(`/summarize/${docId}${force ? '?force=true' : ''}`, { method: 'POST' }),
   get: (docId) => req(`/result/${docId}`),
   cancel: (docId) => req(`/api/documents/${docId}/cancel`, { method: 'POST' })
 }
