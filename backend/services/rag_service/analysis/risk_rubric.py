@@ -1,7 +1,7 @@
 import re
 from typing import Optional
 
-RUBRIC_VERSION = "1.1"
+RUBRIC_VERSION = "1.3"
 
 STATUS_FACTOR = {"GAP": 1.0, "PARTIAL": 0.5, "COMPLIANT": 0.0}
 
@@ -80,6 +80,8 @@ RISK_CHECKLIST: list[dict] = [
             r"confidential information.{0,250}(shall not|must not|will not|not to)\s+(disclose|use|reveal)",
             r"(keep|hold|maintain|treat).{0,40}(in )?(strict )?confiden(ce|tial)",
             r"non-?disclosure",
+            r"confidential information only (for|to)",
+            r"disclose (it|such information|the same) only to",
         ],
         "weak": [r"confidential"],
         "gap_text": "no confidentiality obligation",
@@ -233,6 +235,8 @@ def _status(item: dict, text: str) -> tuple[str, str]:
 
 SEVERITY_POINTS = {"Critical": 15, "High": 10, "Medium": 5, "Low": 3}
 
+RESIDUAL_RISK = 5
+
 _PARTY = r"(vendor|service provider|supplier|contractor|licensor|developer|consultant|company|client|customer|licensee|employee)"
 
 RED_FLAGS: list[dict] = [
@@ -363,15 +367,15 @@ RED_FLAGS: list[dict] = [
     },
     {
         "id": "F12",
-        "title": "Delayed or withheld payment",
+        "title": "Long, withheld or set-off payments",
         "severity": "Medium",
-        "law": "MSMED Act 2006 s.15 (payment within 45 days to micro and small suppliers)",
+        "law": "MSMED Act 2006 s.15 (payment within 45 days, if the supplier is a micro or small enterprise)",
         "patterns": [
             r"\(?\b(4[6-9]|[5-9]\d|\d{3})\)? days of (receipt of )?(a |the )?(valid )?invoice",
             r"may withhold[^.]{0,80}payment",
             r"set off any amount claimed",
         ],
-        "finding": "payment can be delayed beyond 45 days, withheld or set off against disputed claims",
+        "finding": "payment terms favour the payer: longer than 45 days, or payments can be withheld or set off",
     },
     {
         "id": "F13",
@@ -404,6 +408,71 @@ RED_FLAGS: list[dict] = [
             r"bear all costs of (the )?arbitration[^.]{0,40}irrespective of the outcome",
         ],
         "finding": "a party must pay a deposit or all costs just to contest a claim",
+    },
+    {
+        "id": "F16",
+        "title": "Unequal termination for convenience",
+        "severity": "Medium",
+        "law": "Indian Contract Act 1872 (mutuality of exit rights)",
+        "all_of": [
+            r"(client|customer|company|licensee) may terminate[^.]{0,80}for convenience",
+            r"(service provider|vendor|supplier|contractor|licensor|developer) may terminate[^.]{0,80}for convenience only|(service provider|vendor|supplier|contractor)[^.]{0,40}(may not|shall not|cannot) terminate[^.]{0,40}for convenience",
+        ],
+        "finding": "one party can leave for convenience much more easily, or much sooner, than the other",
+    },
+    {
+        "id": "F17",
+        "title": "Delayed or restricted deemed acceptance",
+        "severity": "Medium",
+        "law": "Indian Contract Act 1872 s.29 (uncertain terms); payment linked to acceptance",
+        "patterns": [
+            r"deemed accepted only (when|if|after)",
+            r"deemed accept(ed|ance)[^.]{0,120}(live production|in production|commercial use)[^.]{0,60}(\d+|[a-z-]+ \(\d+\)) (consecutive )?days",
+        ],
+        "finding": "work counts as accepted only after a long period of live use, which delays milestone payments",
+    },
+    {
+        "id": "F18",
+        "title": "Free additional work",
+        "severity": "Medium",
+        "law": "Indian Contract Act 1872 s.2(d) (consideration); change control",
+        "patterns": [
+            r"implement[^.]{0,40}changes[^.]{0,160}(at no additional charge|without (any )?additional charge|free of charge)",
+            r"person-?hours[^.]{0,80}(at no additional charge|free of charge|without (any )?additional charge)",
+        ],
+        "finding": "the supplier must do extra change work without being paid for it",
+    },
+    {
+        "id": "F19",
+        "title": "One-sided right to assign",
+        "severity": "Low",
+        "law": "Indian Contract Act 1872 (assignment of contractual rights)",
+        "patterns": [r"(the )?(client|customer|company|licensee) may assign[^.]{0,80}(on (written )?notice|without (the other party's )?consent)"],
+        "finding": "only one party may transfer the contract without the other's consent",
+    },
+    {
+        "id": "F20",
+        "title": "Automatic renewal",
+        "severity": "Low",
+        "law": "Indian Contract Act 1872 (renewal terms)",
+        "patterns": [r"automatically renew", r"(shall|will) (be )?automatically (renewed|extended)"],
+        "finding": "the contract renews by itself unless notice is given in time",
+    },
+    {
+        "id": "F21",
+        "title": "One-sided costs",
+        "severity": "Low",
+        "law": "Indian Stamp Act 1899 / Delhi stamp rules (allocation of stamp duty)",
+        "patterns": [r"stamp duty[^.]{0,80}borne (solely )?by the (service provider|vendor|supplier|contractor|licensor|developer)"],
+        "finding": "one party alone pays costs, such as stamp duty, that are usually shared",
+    },
+    {
+        "id": "F22",
+        "title": "Short notice deadline to claim relief",
+        "severity": "Low",
+        "law": "Indian Contract Act 1872 s.28 (time limits on enforcing rights)",
+        "patterns": [r"(not (be )?responsible|not liable|relieved)[^.]{0,160}provided (that )?it notifies[^.]{0,80}within (\d+|[a-z-]+ \(\d+\))"],
+        "finding": "a party loses protection for delays it did not cause unless it gives notice within a short deadline",
     },
 ]
 
@@ -473,7 +542,7 @@ def assess_risk(text: str) -> dict:
         findings.append(entry)
 
     total = sum(f["points"] for f in findings)
-    score = min(100, round(total))
+    score = max(RESIDUAL_RISK, min(100, round(total)))
     if any(f["severity"] == "Critical" for f in red_flags):
         score = max(score, 61)
 
