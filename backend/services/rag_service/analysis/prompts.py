@@ -287,6 +287,7 @@ def _clause_texts(text: str) -> dict:
         heading = _CLAUSE_HEADING.match(line)
         if heading:
             current = heading.group(1)
+            clauses[current] = heading.group(2).lower()
             continue
         sub = _SUBCLAUSE.match(line)
         if sub and not heading:
@@ -315,6 +316,35 @@ def _wrong_parties(items: list[str], clauses: dict) -> bool:
         if subject not in item.split(":", 1)[0].lower():
             wrong += 1
     return checked > 0 and wrong * 2 >= checked
+
+
+_STOP = {"shall", "must", "party", "parties", "agreement", "other", "which", "their", "under", "without", "within", "information", "confidential", "recipient", "discloser", "written", "notice", "after", "before", "where", "there", "these", "those", "about", "until"}
+
+
+def _words(text: str) -> set:
+    return {w for w in re.findall(r"[a-z]{4,}", text.lower()) if w not in _STOP}
+
+
+def _fix_clause_numbers(items: list[str], clauses: dict) -> list[str]:
+    if not clauses:
+        return items
+    fixed = []
+    for item in items:
+        m = re.search(r"cl\.\s*(\d+[A-Z]?(?:\.\d+)*)", item)
+        if not m:
+            fixed.append(item)
+            continue
+        words = _words(re.sub(r"cl\.\s*\S+", "", item))
+        if len(words) < 2:
+            fixed.append(item)
+            continue
+        score = lambda num: len(words & _words(" ".join(v for k, v in clauses.items() if k == num or k.startswith(num + ".")))) / len(words)
+        cited = m.group(1)
+        best = max(clauses, key=score)
+        if score(best) >= 0.5 and score(best) >= score(cited) + 0.25 and not best.startswith(cited + "."):
+            item = item[:m.start(1)] + best + item[m.end(1):]
+        fixed.append(item)
+    return fixed
 
 
 def _party_in_text(item: str, text: str) -> bool:
@@ -359,11 +389,13 @@ def _ground(result: dict, source_text: str, risk_assessment: Optional[dict]) -> 
 
     summary = _keep_grounded_text(result.get("summary", ""), doc_facts)
     result["summary"] = summary or (f"This document is a {title}." if title else result.get("summary", ""))
-    result["clauses"] = _keep_grounded(result.get("clauses", []), doc_facts)
+    clause_map = _clause_texts(source_text)
+    result["clauses"] = _fix_clause_numbers(_keep_grounded(result.get("clauses", []), doc_facts), clause_map)
     if _names_only(result["clauses"]):
         result["clauses"] = _clause_digest(source_text) or result["clauses"]
     result["obligations"] = [o for o in _keep_grounded(result.get("obligations", []), doc_facts) if _party_in_text(o, source_text)]
-    if not result["obligations"] or _wrong_parties(result["obligations"], _clause_texts(source_text)):
+    result["obligations"] = _fix_clause_numbers(result["obligations"], clause_map)
+    if not result["obligations"] or _wrong_parties(result["obligations"], clause_map):
         result["obligations"] = _obligation_digest(source_text) or result["obligations"]
     result["critical_risks"] = re.sub(r"\b[RF]\d{1,2}\b:?\s*", "", result.get("critical_risks", ""))
     result["critical_risks"] = _keep_grounded_text(result.get("critical_risks", ""), all_facts)
