@@ -27,7 +27,7 @@ class OllamaProvider:
                 stream=False,
                 options={
                     "num_predict":    4096,
-                    "num_ctx":        8192,
+                    "num_ctx":        16384,
                     "temperature":    0,
                     "seed":           42,
                     "top_k":          30,

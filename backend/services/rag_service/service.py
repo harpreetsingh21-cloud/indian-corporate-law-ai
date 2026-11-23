@@ -9,6 +9,8 @@ from services.rag_service.extraction import extract_text
 
 logger = logging.getLogger(__name__)
 
+FULL_TEXT_LIMIT = 14000
+
 _llm_provider = None
 _embedding_provider = None
 _global_vector_store = None
@@ -130,7 +132,9 @@ async def run_analysis(filepath: str, filename: str, progress_callback=None) -> 
 
     await _notify("INDEXING")
     logger.info("[STEP 3/4] Building IT corporate legal analysis prompt...")
-    prompt = build_prompt(doc_full=text[:3000], local_context=local_ctx, law_context=law_ctx, doc_type=doc_type, risk_assessment=risk)
+    doc_for_prompt = text if len(text) <= FULL_TEXT_LIMIT else local_ctx
+    logger.info(f"[PROMPT] Sending {'full document' if doc_for_prompt is text else 'selected excerpts'} ({len(doc_for_prompt):,} chars)")
+    prompt = build_prompt(doc_full=doc_for_prompt, local_context=local_ctx, law_context=law_ctx, doc_type=doc_type, risk_assessment=risk)
 
     await _notify("ANALYZING")
     logger.info("[STEP 4/4] Calling LLM...")
@@ -140,5 +144,5 @@ async def run_analysis(filepath: str, filename: str, progress_callback=None) -> 
     if raw is None:
         return {"error": "LLM timed out or returned empty response"}
 
-    result = _parse_response(raw, doc_type, risk)
+    result = _parse_response(raw, doc_type, risk, text)
     return result

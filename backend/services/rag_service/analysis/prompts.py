@@ -109,131 +109,166 @@ def _classify_document(text: str) -> str:
     return "non_legal"
 
 
+_TITLE = re.compile(r"\s*\(?([A-Za-z][^.()\n]{3,110}?\b(?:agreement|contract|deed|licen[cs]e|addendum|memorandum of understanding))\b", re.IGNORECASE)
+
+
+def _document_title(text: str) -> str:
+    for line in text.splitlines()[:6]:
+        m = _TITLE.match(line)
+        if m and not m.group(1).lower().startswith(("this ", "the ")):
+            title = m.group(1).strip()
+            return title.title() if title.isupper() else title
+    return ""
+
+
+def _compliance_lines(risk_assessment: Optional[dict]) -> list[str]:
+    if not risk_assessment:
+        return []
+    labels = {"COMPLIANT": "Addressed", "PARTIAL": "Partly addressed", "GAP": "Not addressed"}
+    lines = []
+    for c in risk_assessment.get("risk_checklist", []):
+        if c["status"] not in labels:
+            continue
+        if c["status"] == "COMPLIANT" and c["finding"] != "adequately addressed":
+            lines.append(f"No issue found: {c['title']}, {c['finding']} ({c['law']})")
+        elif c["status"] == "COMPLIANT":
+            lines.append(f"{labels[c['status']]}: {c['title']} ({c['law']})")
+        else:
+            lines.append(f"{labels[c['status']]}: {c['title']}, {c['finding']} ({c['law']})")
+    return lines
+
+
 def build_prompt(doc_full: str, local_context: str, law_context: str, doc_type: str, risk_assessment: Optional[dict] = None) -> str:
-    clause_instruction = f"""
-KNOWN IT & CORPORATE CLAUSE TYPES (check which ones are PRESENT in the document):
-{_CLAUSE_NAMES_LIST}
+    title = _document_title(doc_full) or "Not stated"
+    document_text = doc_full or local_context
+    compliance_facts = "\n".join(f"- {line}" for line in _compliance_lines(risk_assessment)) or "(not available)"
 
-For each clause you identify as PRESENT, include it in the "clauses" array formatted as:
-"Clause Name — [exact meaning/impact as it appears in THIS document]"
-"""
+    return f"""You are an Indian legal analyst. Read the contract below and report ONLY what it actually says.
 
-    if doc_type == "corporate_legal":
-        task_block = f"""
-TASK — FULL IT CORPORATE LEGAL ANALYSIS:
+STRICT RULES:
+1. Use only facts written in the CONTRACT TEXT. Do not use outside knowledge about other contracts.
+2. Never invent numbers, percentages, time limits, amounts, parties or clauses. Every number you write must appear in the contract.
+3. Mention the clause number (for example "cl. 5" or "cl. 12D") for every clause and obligation.
+4. If something is not in the contract, leave it out. Do not guess.
+5. Cite a law only if it is named in the contract or in the RISK FINDINGS / COMPLIANCE FACTS below.
 
-You MUST analyze every section of this document thoroughly with specific focus on IT Department, technology operations, cyber law, and corporate compliance:
-
-1. SUMMARY (MANDATORY: minimum 120 words):
-   - What type of IT document is this? (e.g., Master Services Agreement, SaaS Agreement, Software License, Service Level Agreement, Data Processing Agreement, IT Employee NDA & Invention Assignment, Cloud Hosting Contract)
-   - Who are the parties? (e.g., Tech Vendor, Cloud Service Provider, Enterprise Client, IT Department, Developer)
-   - What is the core technology scope, deliverables, or software architecture?
-   - What is the commercial value, subscription fee, or financial consideration?
-   - What is the contract duration, renewal terms, and SLA uptime commitment (e.g., 99.9%)?
-   - What governing law and dispute jurisdiction apply?
-   - Any critical risks, unusual carve-outs, or notable tech governance terms?
-
-2. CLAUSES — identify ALL IT & corporate clauses present (aim for 5-10 clauses):
-   Use the clause checklist above. For EACH clause found, write:
-   "[Clause Name] — [exact meaning/impact as it appears in THIS document]"
-
-3. OBLIGATIONS — list ALL concrete technical and legal duties of EACH party (aim for 5-8 items):
-   Be specific: e.g., "Vendor must maintain 99.9% monthly availability and report P1 severity bugs within 1 hour", not generic statements.
-
-4. CRITICAL RISKS — explain the GAP and PARTIAL items of the RULE-BASED RISK CHECKLIST below:
-   Do not change those results and do not give your own risk score.
-   For each item, explain the practical and legal impact for the IT stakeholders and cite the law given.
-
-5. COMPLIANCE — detailed IT legal compliance analysis:
-   - How does this document align with Indian IT Act 2000/2008 (Sec 43A, 72A, 79)?
-   - DPDP Act 2023 compliance (Data Fiduciary / Data Processor terms, consent, breach reporting)?
-   - CERT-In Cyber Security Directions (6-hour breach reporting, 180-day log retention)?
-   - Intellectual Property & Copyright Act 1957 (software work-for-hire assignment)?
-   - Companies Act 2013 IT governance & internal financial controls?
-   - Are any clauses void or unenforceable (e.g., Sec 27 post-employment non-compete for tech engineers)?
-"""
-    else:
-        task_block = """
-TASK — DOCUMENT ANALYSIS (IT CONTEXT):
-
-Analyze this document for Information Technology department relevance, commitments, and legal aspects:
-
-1. SUMMARY (minimum 80 words):
-   - What is this document?
-   - How does it relate to the IT Department, software development, or corporate tech operations?
-   - Parties, technical scope, and core takeaway.
-
-2. CLAUSES — list any terms, conditions, or IT commitments. If none, write: []
-3. OBLIGATIONS — duties or action items mentioned for tech personnel or vendors. If none, write: []
-4. CRITICAL RISKS — explain the GAP and PARTIAL items of the RULE-BASED RISK CHECKLIST below. Do not give your own risk score.
-5. COMPLIANCE — relevant Indian IT laws (IT Act, DPDP, CERT-In, Copyright) if applicable.
-"""
-
-    return f"""You are the Principal Corporate Legal Counsel and Head of IT Legal Affairs for enterprise technology corporations, with 20+ years of corporate experience advising IT Departments, Chief Information Officers (CIOs), Chief Information Security Officers (CISOs), General Counsels, and Software Enterprise Executives.
-
-You possess authoritative legal expertise in Indian and International Corporate Laws governing Information Technology:
-- Information Technology Act, 2000 (with 2008 Amendments): Electronic contracts (Sec 10A), sensitive data protection & compensation (Sec 43A), cyber offences & hacking (Sec 65, 66), breach of confidentiality (Sec 72A), and intermediary safe harbor liability (Sec 79).
-- Digital Personal Data Protection Act, 2023 (DPDP Act) & GDPR alignment: Data Fiduciary and Data Processor duties, consent managers, employee tech monitoring, cross-border data transfer restrictions, and mandatory data breach notifications to the Data Protection Board.
-- CERT-In Cyber Security Directions (2022/current): Mandatory 6-hour cyber incident reporting, 180-day system logs retention within Indian jurisdiction, and NTP server time synchronization for all tech infrastructure.
-- Indian Contract Act, 1872 applied to IT: Master Services Agreements (MSA), Statements of Work (SOW), SaaS agreements, Service Level Agreements (SLA uptime, latency, service credits), IP indemnification, limitation of liability & data loss caps, and Section 27 non-compete enforceability for tech employees.
-- Software Intellectual Property & Trade Secrets: Copyright Act 1957 (software code as literary work Sec 2(o), work-for-hire Sec 17), Patents Act 1970 (Sec 3(k) computer-related inventions), Open Source Software (OSS) licenses (GPL copyleft contamination vs Apache/MIT permissive), Source Code Escrow, and proprietary algorithms.
-- Companies Act, 2013 for Tech Operations: Board of Directors oversight on cybersecurity and IT internal controls (Sec 134), Audit Committee supervision of cyber risk and tech audits (Sec 177), and Related Party Transactions in IT procurement and outsourcing (Sec 188).
-
-You analyze IT agreements and technology documents with rigorous legal precision, zero hallucinations, and clear practical business recommendations for IT operations.
-
-{INDIAN_LAW_CONTEXT}
+DOCUMENT TITLE: {title}
 
 {'=' * 60}
-RETRIEVED STATUTORY CONTEXT:
-{law_context or "(Knowledge base not available — rely on embedded IT law context above)"}
+CONTRACT TEXT:
+{document_text}
 
 {'=' * 60}
-DOCUMENT TO ANALYZE (full text excerpt):
-{local_context or doc_full[:2500]}
+RELEVANT LAW EXTRACTS (use only if they match the contract):
+{law_context or "(none)"}
 
 {'=' * 60}
-RULE-BASED RISK CHECKLIST (computed from the full document; authoritative, do not change):
+RISK FINDINGS (computed by rules from the full contract; do not change them):
 {findings_for_prompt(risk_assessment) if risk_assessment else "(not available)"}
 
-{'=' * 60}
-{clause_instruction}
+COMPLIANCE FACTS (computed by rules; do not contradict them):
+{compliance_facts}
 
 {'=' * 60}
-{task_block}
+TASKS:
+1. "document_type": the type of this contract in a few words, based on its title and content.
+2. "summary": 6-8 short sentences: what the contract is, the parties and their roles, the purpose, the term and how it ends, the most important duties, and the governing law and dispute forum.
+3. "clauses": 6-10 items, each "Clause name (cl. X): what this contract says". Only clauses that exist in the contract.
+4. "obligations": 6-10 items, each "Party: duty, with the exact time limit if the contract gives one (cl. X)".
+5. "critical_risks": one paragraph explaining the RISK FINDINGS above for this contract, using the law given with each finding. If there are none, say the rules found no significant risks.
+6. "compliance": one paragraph explaining the COMPLIANCE FACTS above in plain words. Do not add other laws.
 
-{'=' * 60}
-OUTPUT RULES (NON-NEGOTIABLE):
-1. Output ONLY a single valid JSON object — nothing before it, nothing after it
-2. NO markdown code fences (no ```json)
-3. NO <think> or reasoning tags
-4. NO placeholder text like "..." or "[insert]"
-5. Every field MUST be populated based on the actual document
-6. If a field genuinely has no content, use [] for arrays or "" for strings
-7. "summary" MUST be at least 100 words — short summaries are invalid
-8. The JSON must start with {{ and end with }}
+OUTPUT RULES:
+- Output ONLY one valid JSON object, starting with {{ and ending with }}.
+- No markdown, no code fences, no <think> tags.
 
-EXACT JSON SCHEMA TO FOLLOW:
+JSON FORMAT:
 {{
-  "document_type": "<specific IT document type, e.g., 'Master Services Agreement (MSA)', 'SaaS & Cloud SLA Agreement', 'Software License & EULA', 'Data Processing Agreement (DPA)', 'IT Employee NDA & IP Assignment', 'Cloud Hosting Agreement', 'IT Procurement Contract'>",
-  "summary": "<Detailed paragraph of minimum 100 words analyzing the IT contract, parties, technical deliverables, financial terms, SLA uptime, duration, and legal jurisdiction.>",
-  "clauses": [
-    "<Clause Name — specific description of how it appears in this exact document>",
-    "<Clause Name — specific description>",
-    "..."
-  ],
-  "obligations": [
-    "<Party Name: specific IT/legal obligation with timeline/milestone>",
-    "..."
-  ],
-  "critical_risks": "<Detailed paragraph explaining the GAP and PARTIAL items of the rule-based risk checklist, their practical impact for IT stakeholders, and the law cited for each.>",
-  "compliance": "<Detailed paragraph: compliance with Indian IT Act 2000, Indian Contract Act 1872, DPDP Act 2023, and Companies Act 2013 IT corporate governance requirements.>"
-}}
-
-OUTPUT ONLY THE JSON. START WITH {{ END WITH }}"""
+  "document_type": "",
+  "summary": "",
+  "clauses": [""],
+  "obligations": [""],
+  "critical_risks": "",
+  "compliance": ""
+}}"""
 
 
-def _parse_response(raw: str, doc_type: str, risk_assessment: Optional[dict] = None) -> dict:
-    return _apply_risk(_parse_llm(raw, doc_type), risk_assessment)
+def _parse_response(raw: str, doc_type: str, risk_assessment: Optional[dict] = None, source_text: str = "") -> dict:
+    result = _apply_risk(_parse_llm(raw, doc_type), risk_assessment)
+    if source_text:
+        result = _ground(result, source_text, risk_assessment)
+    return result
+
+
+_NUMBER_WORD = re.compile(r"\b[a-z]+(?:-[a-z]+)? \((\d+)\)")
+_QUANTITY = re.compile(r"(\d+(?:\.\d+)?)\s*-?\s*(%|percent|hours?|hrs?|days?|business days|weeks?|months?|years?|crores?|lakhs?)\b")
+_SECTION = re.compile(r"\b(?:sec(?:tion)?s?\.?|s\.|ss\.|rule)\s*(\d+[a-z]?)", re.IGNORECASE)
+_CONCEPTS = {
+    "cloud": r"\bcloud\b", "saas": r"\bsaas\b", "uptime": r"\buptime\b|\bavailability\b",
+    "sla": r"\bsla\b|service[- ]levels?", "hosting": r"\bhosting\b", "msa": r"master services agreement|\bmsa\b",
+    "bug": r"\bp1\b|\bbugs?\b", "cert-in": r"cert-?\s?in", "non-compete": r"non-?compete",
+    "escrow": r"\bescrow\b", "subscription": r"\bsubscription\b", "audit committee": r"audit committee",
+    "related party": r"related party", "companies act": r"companies act", "work-for-hire": r"work[- ]for[- ]hire",
+    "literary work": r"literary work", "dpia": r"\bdpia\b", "dpo": r"\bdpo\b|data protection officer",
+    "milestone": r"\bmilestones?\b", "payment": r"\bpayments?\b|\binvoices?\b|\bfees?\b",
+}
+
+
+def _unit(u: str) -> str:
+    u = u.lower()
+    if u in ("%", "percent"):
+        return "%"
+    return u.rstrip("s").replace("business day", "day").replace("hr", "hour")
+
+
+def _facts(text: str) -> tuple[set, set, set]:
+    lower = _NUMBER_WORD.sub(r"\1", text.lower())
+    quantities = {(n, _unit(u)) for n, u in _QUANTITY.findall(lower)}
+    sections = {m.lower() for m in _SECTION.findall(lower)}
+    concepts = {name for name, pattern in _CONCEPTS.items() if re.search(pattern, lower)}
+    return quantities, sections, concepts
+
+
+def _is_grounded(sentence: str, facts: tuple[set, set, set]) -> bool:
+    quantities, sections, concepts = facts
+    lower = _NUMBER_WORD.sub(r"\1", sentence.lower())
+    if any((n, _unit(u)) not in quantities for n, u in _QUANTITY.findall(lower)):
+        return False
+    if any(s.lower() not in sections for s in _SECTION.findall(lower)):
+        return False
+    return all(name in concepts for name, pattern in _CONCEPTS.items() if re.search(pattern, lower))
+
+
+def _keep_grounded(items: list[str], facts: tuple[set, set, set]) -> list[str]:
+    return [i for i in items if _is_grounded(i, facts)]
+
+
+def _keep_grounded_text(text: str, facts: tuple[set, set, set]) -> str:
+    sentences = re.split(r"(?<=[.!?])\s+(?=[A-Z])", (text or "").strip())
+    return " ".join(s for s in sentences if s and _is_grounded(s, facts))
+
+
+def _ground(result: dict, source_text: str, risk_assessment: Optional[dict]) -> dict:
+    doc_facts = _facts(source_text)
+    findings = findings_for_prompt(risk_assessment) if risk_assessment else ""
+    findings += " " + " ".join(l for l in _compliance_lines(risk_assessment) if not l.startswith("No issue found"))
+    law_facts = _facts(findings)
+    all_facts = tuple(a | b for a, b in zip(doc_facts, law_facts))
+
+    title = _document_title(source_text)
+    if title:
+        result["document_type"] = title
+
+    summary = _keep_grounded_text(result.get("summary", ""), doc_facts)
+    result["summary"] = summary or (f"This document is a {title}." if title else result.get("summary", ""))
+    result["clauses"] = _keep_grounded(result.get("clauses", []), doc_facts)
+    result["obligations"] = _keep_grounded(result.get("obligations", []), doc_facts)
+    result["critical_risks"] = _keep_grounded_text(result.get("critical_risks", ""), all_facts)
+
+    lines = _compliance_lines(risk_assessment)
+    explanation = _keep_grounded_text(result.get("compliance", ""), all_facts)
+    result["compliance"] = "\n".join(lines + ([explanation] if explanation else [])) if lines else explanation
+    return result
 
 
 def _apply_risk(result: dict, risk_assessment: Optional[dict]) -> dict:

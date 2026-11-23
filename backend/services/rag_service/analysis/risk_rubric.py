@@ -1,12 +1,13 @@
 import re
 from typing import Optional
 
-RUBRIC_VERSION = "1.3"
+RUBRIC_VERSION = "1.5"
 
 STATUS_FACTOR = {"GAP": 1.0, "PARTIAL": 0.5, "COMPLIANT": 0.0}
 
 _PERSONAL_DATA = r"personal data|personal information|customer data|user data|\bpii\b|data principal|data fiduciary|data processor|processing of (personal )?data|sensitive personal"
 _IT_SYSTEMS = r"hosting|cloud|server|infrastructure|software|saas|platform|it services|system|network|cyber|incident"
+_NDA_TITLE = r"non-?disclosure agreement|confidentiality agreement|\bnda\b"
 
 RISK_CHECKLIST: list[dict] = [
     {
@@ -32,9 +33,11 @@ RISK_CHECKLIST: list[dict] = [
         "weight": 12,
         "applies_if": _PERSONAL_DATA,
         "strong": [
-            r"(breach|incident).{0,120}(notify|notification|inform|report|intimat).{0,80}\b(\d+|[a-z-]+ \(\d+\))\s*(hours|hrs|days|business days)\b",
-            r"(notify|notification|inform|report|intimat).{0,80}\b(\d+|[a-z-]+ \(\d+\))\s*(hours|hrs|days|business days)\b.{0,120}(breach|incident)",
+            r"(breach|incident|unauthori[sz]ed (use|disclosure|access)).{0,160}(notify|notification|inform|report|intimat).{0,80}\b(\d+|[a-z-]+ \(\d+\))\s*(hours|hrs|days|business days)\b",
+            r"(notify|notification|inform|report|intimat).{0,80}\b(\d+|[a-z-]+ \(\d+\))\s*(hours|hrs|days|business days)\b.{0,120}(breach|incident|unauthori[sz]ed (use|disclosure|access))",
             r"(breach|incident).{0,120}(notify|notification|inform|report|intimat).{0,40}(without (undue )?delay|immediately|promptly)",
+            r"(notify|notification|inform|report|intimat).{0,120}(breach|incident).{0,120}\b(\d+|[a-z-]+ \(\d+\))\s*(hours|hrs|days|business days)\b",
+            r"(notify|notification|inform|report|intimat).{0,120}(breach|incident).{0,80}(without (undue )?delay|immediately|promptly)",
         ],
         "weak": [r"(breach|incident).{0,120}(notify|notification|inform|report|intimat)", r"(notify|notification|inform|report).{0,80}(breach|incident)"],
         "gap_text": "no obligation to notify a personal data breach",
@@ -43,6 +46,7 @@ RISK_CHECKLIST: list[dict] = [
     {
         "id": "R3",
         "title": "CERT-In incident reporting and log retention",
+        "skip_for_nda": True,
         "law": "CERT-In Directions dated 28 April 2022 under IT Act 2000 s.70B(6) (6-hour reporting, 180-day logs)",
         "weight": 10,
         "applies_if": _IT_SYSTEMS,
@@ -96,6 +100,7 @@ RISK_CHECKLIST: list[dict] = [
         "strong": [
             r"(intellectual property|\bip\b|copyright|source code|deliverables|work product).{0,160}(shall (vest|belong|remain)|vests? (solely )?in|owned (solely |exclusively )?by|hereby assigns?|assignment of|sole (and exclusive )?property|exclusive property)",
             r"(shall (vest|belong|remain)|owned by|hereby assigns?|sole property).{0,160}(intellectual property|copyright|source code|deliverables|work product)",
+            r"(confidential information|intellectual property|deliverables).{0,40}remains? the (sole |exclusive )?property of",
         ],
         "weak": [r"intellectual property", r"copyright", r"\blicen[cs]e\b"],
         "gap_text": "ownership of intellectual property is not addressed",
@@ -146,6 +151,7 @@ RISK_CHECKLIST: list[dict] = [
     {
         "id": "R10",
         "title": "Service levels with remedies",
+        "skip_for_nda": True,
         "law": "Indian Contract Act 1872 s.74 (liquidated damages and service credits)",
         "weight": 6,
         "applies_if": _IT_SYSTEMS,
@@ -164,7 +170,7 @@ RISK_CHECKLIST: list[dict] = [
         "weight": 6,
         "applies_if": None,
         "strong": [
-            r"terminat.{0,250}(transition|exit assistance|migration|return (of )?(all )?(the )?(client |customer )?(data|materials|confidential information)|hand ?over)",
+            r"terminat.{0,250}(transition|exit assistance|migration|return (or (securely )?destroy )?(of )?(all )?(the )?(client |customer )?(data|materials|confidential information)|hand ?over)",
             r"(transition|exit assistance|migration|hand ?over).{0,250}terminat",
         ],
         "weak": [r"terminat"],
@@ -191,17 +197,27 @@ def _sentences(text: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
+_IN_SENTENCE = r"(?:[^.\n]|\.(?=\S))"
+
+
+def _within_sentence(pattern: str) -> str:
+    pattern = re.sub(r"(?<!\\)\.\{", lambda m: _IN_SENTENCE + "{", pattern)
+    return pattern.replace("[^.]{", _IN_SENTENCE + "{")
+
+
 def _find(patterns: list[str], text: str) -> Optional[str]:
     lower = text.lower()
     for pattern in patterns:
-        m = re.search(pattern, lower, re.DOTALL)
+        m = re.search(_within_sentence(pattern), lower)
         if m:
             return _evidence(text, m.start(), m.end())
     return None
 
 
 def _evidence(text: str, start: int, end: int) -> str:
-    left = max(text.rfind("\n", 0, start), text.rfind(". ", 0, start) + 1) + 1
+    newline = text.rfind("\n", 0, start)
+    stop = text.rfind(". ", 0, start)
+    left = max(newline + 1, stop + 2 if stop != -1 else 0)
     right_candidates = [i for i in (text.find(". ", end), text.find("\n", end)) if i != -1]
     right = min(right_candidates) + 1 if right_candidates else len(text)
     snippet = " ".join(text[left:right].split())
@@ -502,8 +518,11 @@ def assess_risk(text: str) -> dict:
     text = text or ""
     lower = text.lower()
     checklist, findings = [], []
+    is_nda = re.search(_NDA_TITLE, lower[:400]) is not None
     for item in RISK_CHECKLIST:
         applies = not item["applies_if"] or re.search(item["applies_if"], lower) is not None
+        if is_nda and item.get("skip_for_nda"):
+            applies = False
         if not applies:
             checklist.append({
                 "id": item["id"], "title": item["title"], "law": item["law"], "weight": item["weight"],
