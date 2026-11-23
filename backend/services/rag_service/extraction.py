@@ -58,6 +58,7 @@ def _strip_repeated_page_lines(pages: list[str]) -> list[str]:
 def normalize_text(text: str) -> str:
     text = _clean_chars(text)
     text = re.sub(r"(\w)-\n(\w)", r"\1-\2", text)
+    text = re.sub(r"([a-z])\n(\(\d+\))", r"\1 \2", text)
     lines = [re.sub(r"\s+", " ", l).strip() for l in text.split("\n")]
     lines = [l for l in lines if l and not _PAGE_NUMBER.match(l)]
 

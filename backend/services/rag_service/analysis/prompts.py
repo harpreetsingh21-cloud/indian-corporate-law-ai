@@ -175,7 +175,7 @@ COMPLIANCE FACTS (computed by rules; do not contradict them):
 {'=' * 60}
 TASKS:
 1. "document_type": the type of this contract in a few words, based on its title and content.
-2. "summary": 6-8 short sentences: what the contract is, the parties and their roles, the purpose, the term and how it ends, the most important duties, and the governing law and dispute forum.
+2. "summary": 8-10 sentences covering, in this order: (a) what the contract is and whether it is mutual; (b) the parties and their roles; (c) the purpose; (d) the term, how it can end, and what survives after it ends; (e) the 3-5 most important duties with their exact time limits; (f) liability, indemnity and remedies; (g) the governing law and dispute forum. Use only facts from the contract.
 3. "clauses": the 8-12 most important clauses, each "Clause name (cl. X): what this clause requires, with any time limit or amount". Skip definitions and boilerplate. A clause name alone is not enough; always say what it requires.
 4. "obligations": 6-10 items, each "Party: duty, with the exact time limit if the contract gives one (cl. X)".
 5. "critical_risks": one paragraph explaining the RISK FINDINGS above for this contract in plain words, using the law given with each finding. Keep the meaning of each finding exactly (if it says there is no cap, do not say liability is capped). Do not use codes. If there are none, say the rules found no significant risks.
@@ -203,7 +203,7 @@ def _parse_response(raw: str, doc_type: str, risk_assessment: Optional[dict] = N
     return result
 
 
-_NUMBER_WORD = re.compile(r"\b[a-z]+(?:-[a-z]+)? \((\d+)\)")
+_NUMBER_WORD = re.compile(r"\b[a-z]+(?:-[a-z]+)?\s+\((\d+)\)")
 _QUANTITY = re.compile(r"(\d+(?:\.\d+)?)\s*-?\s*(%|percent|hours?|hrs?|days?|business days|weeks?|months?|years?|crores?|lakhs?)(?![a-z])")
 _SECTION = re.compile(r"\b(?:sec(?:tion)?s?\.?|s\.|ss\.|rule)\s*(\d+[a-z]?)", re.IGNORECASE)
 _CONCEPTS = {
@@ -322,7 +322,8 @@ _STOP = {"shall", "must", "party", "parties", "agreement", "other", "which", "th
 
 
 def _words(text: str) -> set:
-    return {w for w in re.findall(r"[a-z]{4,}", text.lower()) if w not in _STOP}
+    lower = _NUMBER_WORD.sub(r"\1", text.lower())
+    return {w for w in re.findall(r"[a-z]{4,}|\d{2,}", lower) if w not in _STOP}
 
 
 def _fix_clause_numbers(items: list[str], clauses: dict) -> list[str]:
@@ -340,11 +341,27 @@ def _fix_clause_numbers(items: list[str], clauses: dict) -> list[str]:
             continue
         score = lambda num: len(words & _words(" ".join(v for k, v in clauses.items() if k == num or k.startswith(num + ".")))) / len(words)
         cited = m.group(1)
-        best = max(clauses, key=score)
+        best = max(clauses, key=lambda num: (score(num), len(num)))
+        ties = [num for num in clauses if score(num) == score(best) and not best.startswith(num + ".") and not num.startswith(best + ".") and num != best]
+        if ties:
+            fixed.append(item)
+            continue
         if score(best) >= 0.5 and score(best) >= score(cited) + 0.25 and not best.startswith(cited + "."):
             item = item[:m.start(1)] + best + item[m.end(1):]
         fixed.append(item)
     return fixed
+
+
+_ROLE_WITH_NAME = re.compile(r"^(\s*)(Recipient|Discloser|Receiving Party|Disclosing Party)\s*\([^)]*\)", re.IGNORECASE)
+
+
+def _is_mutual(text: str) -> bool:
+    head = text[:3000].lower()
+    return "mutual" in head or "party disclosing information is the" in head or "each party may be" in head
+
+
+def _drop_names_from_roles(items: list[str]) -> list[str]:
+    return [_ROLE_WITH_NAME.sub(r"\1\2", i) for i in items]
 
 
 def _party_in_text(item: str, text: str) -> bool:
@@ -369,6 +386,39 @@ def _obligation_digest(text: str, limit: int = 14) -> list[str]:
     return items
 
 
+_KEY_TERM_PATTERNS = [
+    r"\bsurvive",
+    r"\bwithin\s+\S+\s+\(\d+\)\s+hours\b",
+    r"\bwithin\s+\S+\s+\(\d+\)\s+(days|business days)\b",
+    r"\b(continues? for|remain in force for|for a period of|begins on)\b",
+    r"\b(terminate|end this agreement)\b.{0,80}\bnotice\b",
+    r"\bgoverned by the laws? of\b",
+]
+
+
+def _key_terms(text: str, summary: str, limit: int = 3) -> list[str]:
+    sentences = [s.strip() for s in re.split(r"(?<=[.;])\s+(?=[A-Z0-9])|\n", text) if 40 <= len(s.strip()) <= 260]
+    seen_words = _words(summary)
+    seen_quantities = _facts(summary)[0]
+    picked = []
+    for pattern in _KEY_TERM_PATTERNS:
+        for sentence in sentences:
+            if sentence in picked or not re.search(pattern, sentence, re.IGNORECASE) or re.search(r"\bmeans\b", sentence):
+                continue
+            quantities = _facts(sentence)[0]
+            if quantities and quantities <= seen_quantities:
+                continue
+            if len(_words(sentence) - seen_words) < 4:
+                continue
+            picked.append(sentence)
+            seen_words |= _words(sentence)
+            seen_quantities |= quantities
+            break
+        if len(picked) >= limit:
+            break
+    return [re.sub(r"^\d+[A-Z]?(\.\d+)*\s+", "", p) for p in picked]
+
+
 def _names_only(items: list[str]) -> bool:
     if not items:
         return True
@@ -388,13 +438,20 @@ def _ground(result: dict, source_text: str, risk_assessment: Optional[dict]) -> 
         result["document_type"] = title
 
     summary = _keep_grounded_text(result.get("summary", ""), doc_facts)
-    result["summary"] = summary or (f"This document is a {title}." if title else result.get("summary", ""))
+    summary = summary or (f"This document is a {title}." if title else result.get("summary", ""))
+    if len(summary.split()) < 120:
+        extra = _key_terms(source_text, summary)
+        if extra:
+            summary = "\n".join([summary] + extra)
+    result["summary"] = summary
     clause_map = _clause_texts(source_text)
     result["clauses"] = _fix_clause_numbers(_keep_grounded(result.get("clauses", []), doc_facts), clause_map)
     if _names_only(result["clauses"]):
         result["clauses"] = _clause_digest(source_text) or result["clauses"]
     result["obligations"] = [o for o in _keep_grounded(result.get("obligations", []), doc_facts) if _party_in_text(o, source_text)]
     result["obligations"] = _fix_clause_numbers(result["obligations"], clause_map)
+    if _is_mutual(source_text):
+        result["obligations"] = _drop_names_from_roles(result["obligations"])
     if not result["obligations"] or _wrong_parties(result["obligations"], clause_map):
         result["obligations"] = _obligation_digest(source_text) or result["obligations"]
     result["critical_risks"] = re.sub(r"\b[RF]\d{1,2}\b:?\s*", "", result.get("critical_risks", ""))

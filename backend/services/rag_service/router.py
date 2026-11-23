@@ -129,6 +129,7 @@ async def _result_response(doc_id: str, authorization: Optional[str], background
 
 def _format_result(result: dict) -> dict:
     return {
+        "document_type": result.get("document_type", ""),
         "summary":     result.get("summary", ""),
         "clauses":     result.get("clauses", []),
         "obligations": result.get("obligations", []),
