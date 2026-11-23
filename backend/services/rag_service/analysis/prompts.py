@@ -151,7 +151,7 @@ STRICT RULES:
 3. Mention the clause number (for example "cl. 5" or "cl. 12D") for every clause and obligation.
 4. If something is not in the contract, leave it out. Do not guess.
 5. Cite a law only if it is named in the contract or in the RISK FINDINGS / COMPLIANCE FACTS below.
-6. If the agreement is mutual, say that each party can act in each role. Do not assign fixed roles that the contract does not assign.
+6. Call the agreement "mutual" only if the contract itself says so. Use the roles exactly as the contract assigns them.
 7. Keep exceptions and conditions (for example "except as the Purpose requires").
 8. For each obligation, name the party exactly as the clause does (for example "the Recipient"). Never swap who must do what.
 
@@ -175,9 +175,9 @@ COMPLIANCE FACTS (computed by rules; do not contradict them):
 {'=' * 60}
 TASKS:
 1. "document_type": the type of this contract in a few words, based on its title and content.
-2. "summary": 8-10 sentences covering, in this order: (a) what the contract is and whether it is mutual; (b) the parties and their roles; (c) the purpose; (d) the term, how it can end, and what survives after it ends; (e) the 3-5 most important duties with their exact time limits; (f) liability, indemnity and remedies; (g) the governing law and dispute forum. Use only facts from the contract.
+2. "summary": 8-10 plain sentences (no letters, numbering or labels) covering, in this order: what the contract is; the parties and their roles; the business purpose (what is being bought, built or shared); the term, how it can end, and what survives; the 3-5 most important duties with their exact time limits; liability, indemnity and remedies; and the governing law and dispute forum, worded as in the contract.
 3. "clauses": the 8-12 most important clauses, each "Clause name (cl. X): what this clause requires, with any time limit or amount". Skip definitions and boilerplate. A clause name alone is not enough; always say what it requires.
-4. "obligations": 6-10 items, each "Party: duty, with the exact time limit if the contract gives one (cl. X)".
+4. "obligations": 6-10 items, each "Party: duty, with the exact time limit if the contract gives one (cl. X)". The party must be the one the clause says "shall" do it. Always include the clause number.
 5. "critical_risks": one paragraph explaining the RISK FINDINGS above for this contract in plain words, using the law given with each finding. Keep the meaning of each finding exactly (if it says there is no cap, do not say liability is capped). Do not use codes. If there are none, say the rules found no significant risks.
 6. "compliance": one paragraph explaining the COMPLIANCE FACTS above in plain words. Do not add other laws.
 
@@ -252,10 +252,10 @@ def _keep_grounded_text(text: str, facts: tuple[set, set, set]) -> str:
 
 
 _CLAUSE_HEADING = re.compile(r"^(\d+[A-Z]?)\.\s+([A-Z][A-Za-z ,&/'\-]{2,70})$")
-_BOILERPLATE = ("definition", "interpretation", "general", "counterpart", "notice", "entire agreement", "severab", "recital", "background")
+_BOILERPLATE = ("definition", "interpretation", "general", "counterpart", "notice", "entire agreement", "severab", "recital", "background", "exclusion", "relationship", "survival", "miscellaneous", "counterparts")
 
 
-def _clause_digest(text: str, limit: int = 15) -> list[str]:
+def _clause_digest(text: str, limit: int = 20) -> list[str]:
     lines = [l.strip() for l in text.splitlines()]
     items = []
     for i, line in enumerate(lines):
@@ -287,7 +287,7 @@ def _clause_texts(text: str) -> dict:
         heading = _CLAUSE_HEADING.match(line)
         if heading:
             current = heading.group(1)
-            clauses[current] = heading.group(2).lower()
+            clauses[current] = heading.group(2).lower() + " ||"
             continue
         sub = _SUBCLAUSE.match(line)
         if sub and not heading:
@@ -357,11 +357,28 @@ _ROLE_WITH_NAME = re.compile(r"^(\s*)(Recipient|Discloser|Receiving Party|Disclo
 
 def _is_mutual(text: str) -> bool:
     head = text[:3000].lower()
-    return "mutual" in head or "party disclosing information is the" in head or "each party may be" in head
+    title = _document_title(text).lower()
+    return "mutual" in title or "party disclosing information is the" in head or "each party may be" in head
 
 
 def _drop_names_from_roles(items: list[str]) -> list[str]:
     return [_ROLE_WITH_NAME.sub(r"\1\2", i) for i in items]
+
+
+def _add_clause_numbers(items: list[str], clauses: dict) -> list[str]:
+    result = []
+    for item in items:
+        if re.search(r"cl(ause)?\.?\s*\d", item, re.IGNORECASE) or not clauses:
+            result.append(item)
+            continue
+        words = _words(item)
+        if len(words) < 3:
+            result.append(item)
+            continue
+        scores = {num: len(words & _words(text)) / len(words) for num, text in clauses.items()}
+        best = max(scores, key=lambda num: (scores[num], len(num)))
+        result.append(f"{item.rstrip('. ')} (cl. {best})" if scores[best] >= 0.5 else item)
+    return result
 
 
 def _party_in_text(item: str, text: str) -> bool:
@@ -375,6 +392,7 @@ def _party_in_text(item: str, text: str) -> bool:
 def _obligation_digest(text: str, limit: int = 14) -> list[str]:
     items = []
     for num, body in _clause_texts(text).items():
+        body = body.split("||")[-1].strip()
         sentence = next((s for s in re.split(r"(?<=[.;])\s+(?=[A-Z])", body) if re.search(r"\b(shall|must)\b", s)), "")
         if not sentence or re.search(r"\bmeans\b|shall have the meaning|\bincludes?\b", sentence):
             continue
@@ -426,6 +444,21 @@ def _names_only(items: list[str]) -> bool:
     return short >= len(items) / 2
 
 
+def _cover_findings(paragraph: str, risk_assessment: Optional[dict], limit: int = 4) -> str:
+    if not risk_assessment:
+        return paragraph
+    findings = [f for f in risk_assessment.get("red_flags", [])]
+    findings += [c for c in risk_assessment.get("risk_checklist", []) if c["status"] in ("GAP", "PARTIAL")]
+    if not findings:
+        return paragraph or "The rule-based checks found no significant risks in this contract."
+    lower = paragraph.lower()
+    missing = [f for f in findings if not any(w in lower for w in _words(f["title"]))]
+    if len(missing) * 2 < len(findings):
+        return paragraph
+    lines = [f"{f['title']}: {f['finding']} ({f['law']})." for f in findings[:limit]]
+    return " ".join(([paragraph] if paragraph else []) + ["Main risks found:"] + lines)
+
+
 def _ground(result: dict, source_text: str, risk_assessment: Optional[dict]) -> dict:
     doc_facts = _facts(source_text)
     findings = findings_for_prompt(risk_assessment) if risk_assessment else ""
@@ -449,12 +482,16 @@ def _ground(result: dict, source_text: str, risk_assessment: Optional[dict]) -> 
     if _names_only(result["clauses"]):
         result["clauses"] = _clause_digest(source_text) or result["clauses"]
     result["obligations"] = [o for o in _keep_grounded(result.get("obligations", []), doc_facts) if _party_in_text(o, source_text)]
-    result["obligations"] = _fix_clause_numbers(result["obligations"], clause_map)
+    result["obligations"] = _fix_clause_numbers(_add_clause_numbers(result["obligations"], clause_map), clause_map)
     if _is_mutual(source_text):
         result["obligations"] = _drop_names_from_roles(result["obligations"])
     if not result["obligations"] or _wrong_parties(result["obligations"], clause_map):
         result["obligations"] = _obligation_digest(source_text) or result["obligations"]
     result["critical_risks"] = re.sub(r"\b[RF]\d{1,2}\b:?\s*", "", result.get("critical_risks", ""))
+    parts = re.split(r"(?<=[.!?])\s+", result["critical_risks"])
+    has_findings = bool(risk_assessment and risk_assessment.get("risks"))
+    result["critical_risks"] = " ".join(p for p in parts if not re.search(r"RISK FINDINGS|COMPLIANCE FACTS", p) and not (has_findings and re.search(r"\bno (significant |major |material )?risks?\b", p, re.IGNORECASE)))
+    result["critical_risks"] = _cover_findings(result["critical_risks"], risk_assessment)
     result["critical_risks"] = _keep_grounded_text(result.get("critical_risks", ""), all_facts)
     if re.search(r"no monetary cap|no upper limit|uncapped", findings):
         parts = re.split(r"(?<=[.;])\s+", result["critical_risks"])

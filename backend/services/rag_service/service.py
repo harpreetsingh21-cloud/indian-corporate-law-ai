@@ -9,7 +9,7 @@ from services.rag_service.extraction import extract_text
 
 logger = logging.getLogger(__name__)
 
-FULL_TEXT_LIMIT = 14000
+FULL_TEXT_LIMIT = 30000
 
 _llm_provider = None
 _embedding_provider = None
