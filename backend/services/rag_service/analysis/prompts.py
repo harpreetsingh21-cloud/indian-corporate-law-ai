@@ -346,7 +346,7 @@ def _fix_clause_numbers(items: list[str], clauses: dict) -> list[str]:
         if ties:
             fixed.append(item)
             continue
-        if score(best) >= 0.5 and score(best) >= score(cited) + 0.25 and not best.startswith(cited + "."):
+        if score(best) >= 0.5 and score(best) >= score(cited) + 0.25 and not best.startswith(cited + ".") and not cited.startswith(best + "."):
             item = item[:m.start(1)] + best + item[m.end(1):]
         fixed.append(item)
     return fixed
@@ -393,7 +393,7 @@ def _obligation_digest(text: str, limit: int = 14) -> list[str]:
     items = []
     for num, body in _clause_texts(text).items():
         body = body.split("||")[-1].strip()
-        sentence = next((s for s in re.split(r"(?<=[.;])\s+(?=[A-Z])", body) if re.search(r"\b(shall|must)\b", s)), "")
+        sentence = next((s for s in re.split(r"(?<=[.;])\s+(?=[A-Z])", body) if re.search(r"\b(shall|must)\b", s) and not re.search(r"\b(them|they)\b", s)), "")
         if not sentence or re.search(r"\bmeans\b|shall have the meaning|\bincludes?\b", sentence):
             continue
         if len(sentence) > 220:
@@ -491,14 +491,66 @@ def _parties_sentence(source: str, summary: str) -> str:
     return f"The parties are {named[0]} and {named[1]}."
 
 
+_LEAD_REF = re.compile(r"^\s*Cl(?:ause)?\.?\s*(\d+[A-Z]?(?:\.\d+)*)\s*[:\-–]\s*(.+)$", re.IGNORECASE | re.DOTALL)
+_INLINE_REF = re.compile(r"\((?:cl|clause)\.?\s*(\d+[A-Z]?(?:\.\d+)*)\)", re.IGNORECASE)
+_ROLE_WORDS = ("recipient", "discloser", "party", "parties", "each", "either", "both", "receiving", "disclosing")
+
+
+def _move_lead_ref(item: str) -> str:
+    m = _LEAD_REF.match(item)
+    if not m:
+        return item
+    rest = m.group(2).strip()
+    return rest if _INLINE_REF.search(rest) else f"{rest.rstrip('. ')} (cl. {m.group(1)})"
+
+
+def _best_clause(fragment: str, clauses: dict, cited: str) -> str:
+    words = _words(fragment)
+    if len(words) < 2:
+        return cited
+    def score(num):
+        body = _words(clauses.get(num, ""))
+        hit = len(words & body)
+        return (hit / len(words), hit / (len(body) or 1))
+    candidates = [n for n, v in clauses.items() if not re.search(r"\bmeans\b", v)]
+    if not candidates:
+        return cited
+    best = max(candidates, key=score)
+    current = score(cited) if cited in clauses else (0, 0)
+    if cited not in clauses and score(best)[0] >= 0.3:
+        return best
+    if score(best)[0] >= 0.5 and score(best)[0] >= current[0] + 0.25 and not cited.startswith(best + "."):
+        return best
+    return cited
+
+
+def _fix_inline_refs(text: str, clauses: dict) -> str:
+    if not clauses:
+        return text
+    out, last = [], 0
+    for m in _INLINE_REF.finditer(text):
+        before = text[last:m.start()]
+        fragment = re.split(r"[,;:.]|\band\b", before)[-1] or before
+        out.append(before)
+        out.append(f"(cl. {_best_clause(fragment, clauses, m.group(1))})")
+        last = m.end()
+    out.append(text[last:])
+    return "".join(out)
+
+
+def _labels_are_names(items: list[str]) -> bool:
+    labels = [i.split(":", 1)[0].lower() for i in items if ":" in i]
+    return any(not any(w in l for w in _ROLE_WORDS) for l in labels)
+
+
 def _summary_sentence_ok(sentence: str, source: str, clauses: dict) -> bool:
     lower = sentence.lower()
     law = re.search(r"governed by[^.]{0,60}?laws? of (?:the )?([A-Z][a-z]+(?: [A-Z][a-z]+)?)", source)
-    if law and re.search(r"governing law|governed by", lower) and law.group(1).lower() not in lower:
+    if law and re.search(r"governing law|governed by", lower) and not re.search(rf"\b{re.escape(law.group(1).lower())}\b", lower):
         return False
     cited = [n for n in re.findall(r"\bcl(?:ause)?\.?\s*(\d+[A-Z]?(?:\.\d+)*)", sentence, re.IGNORECASE) if n in clauses]
     if cited:
-        allowed = set().union(*(_digits(clauses[n]) | set(n.split(".")) for n in cited))
+        allowed = set().union(*(_digits(" ".join(v for k, v in clauses.items() if k == n or k.startswith(n + "."))) | set(n.split(".")) for n in cited))
         if not _digits(sentence) <= allowed:
             return False
     if "convenience" in lower:
@@ -543,7 +595,7 @@ def _ground(result: dict, source_text: str, risk_assessment: Optional[dict]) -> 
         result["document_type"] = title
 
     clause_map = _clause_texts(source_text)
-    summary = _keep_grounded_text(_fix_role_names(result.get("summary", ""), source_text), doc_facts)
+    summary = _keep_grounded_text(_fix_inline_refs(_fix_role_names(result.get("summary", ""), source_text), clause_map), doc_facts)
     sentences = re.split(r"(?<=[.!?])\s+(?=[A-Z])", summary)
     sentences = [x for x in sentences if x and _summary_sentence_ok(x, source_text, clause_map)]
     parties = _parties_sentence(source_text, " ".join(sentences))
@@ -556,13 +608,17 @@ def _ground(result: dict, source_text: str, risk_assessment: Optional[dict]) -> 
         if extra:
             summary = "\n".join([summary] + extra)
     result["summary"] = summary
-    result["clauses"] = _fix_clause_numbers(_keep_grounded(result.get("clauses", []), doc_facts), clause_map)
-    if _names_only(result["clauses"]):
+    clauses = [_fix_inline_refs(_move_lead_ref(_fix_role_names(c, source_text)), clause_map) for c in _keep_grounded(result.get("clauses", []), doc_facts)]
+    result["clauses"] = _fix_clause_numbers([c for c in clauses if _summary_sentence_ok(c, source_text, clause_map)], clause_map)
+    if _names_only(result["clauses"]) or len(result["clauses"]) < 4:
         result["clauses"] = _clause_digest(source_text) or result["clauses"]
-    result["obligations"] = [_fix_role_names(o, source_text) for o in _keep_grounded(result.get("obligations", []), doc_facts) if _party_in_text(o, source_text)]
+    obligations = [_fix_inline_refs(_move_lead_ref(_fix_role_names(o, source_text)), clause_map) for o in _keep_grounded(result.get("obligations", []), doc_facts) if _party_in_text(o, source_text)]
+    result["obligations"] = [o for o in obligations if _summary_sentence_ok(o, source_text, clause_map)]
     result["obligations"] = _fix_clause_numbers(_add_clause_numbers(result["obligations"], clause_map), clause_map)
     if _is_mutual(source_text):
         result["obligations"] = _drop_names_from_roles(result["obligations"])
+        if _labels_are_names(result["obligations"]):
+            result["obligations"] = []
     if not result["obligations"] or _wrong_parties(result["obligations"], clause_map):
         result["obligations"] = _obligation_digest(source_text) or result["obligations"]
     result["critical_risks"] = re.sub(r"\b[RF]\d{1,2}\b:?\s*", "", result.get("critical_risks", ""))
