@@ -151,6 +151,9 @@ STRICT RULES:
 3. Mention the clause number (for example "cl. 5" or "cl. 12D") for every clause and obligation.
 4. If something is not in the contract, leave it out. Do not guess.
 5. Cite a law only if it is named in the contract or in the RISK FINDINGS / COMPLIANCE FACTS below.
+6. If the agreement is mutual, say that each party can act in each role. Do not assign fixed roles that the contract does not assign.
+7. Keep exceptions and conditions (for example "except as the Purpose requires").
+8. For each obligation, name the party exactly as the clause does (for example "the Recipient"). Never swap who must do what.
 
 DOCUMENT TITLE: {title}
 
@@ -173,9 +176,9 @@ COMPLIANCE FACTS (computed by rules; do not contradict them):
 TASKS:
 1. "document_type": the type of this contract in a few words, based on its title and content.
 2. "summary": 6-8 short sentences: what the contract is, the parties and their roles, the purpose, the term and how it ends, the most important duties, and the governing law and dispute forum.
-3. "clauses": 6-10 items, each "Clause name (cl. X): what this contract says". Only clauses that exist in the contract.
+3. "clauses": the 8-12 most important clauses, each "Clause name (cl. X): what this clause requires, with any time limit or amount". Skip definitions and boilerplate. A clause name alone is not enough; always say what it requires.
 4. "obligations": 6-10 items, each "Party: duty, with the exact time limit if the contract gives one (cl. X)".
-5. "critical_risks": one paragraph explaining the RISK FINDINGS above for this contract, using the law given with each finding. If there are none, say the rules found no significant risks.
+5. "critical_risks": one paragraph explaining the RISK FINDINGS above for this contract in plain words, using the law given with each finding. Keep the meaning of each finding exactly (if it says there is no cap, do not say liability is capped). Do not use codes. If there are none, say the rules found no significant risks.
 6. "compliance": one paragraph explaining the COMPLIANCE FACTS above in plain words. Do not add other laws.
 
 OUTPUT RULES:
@@ -201,7 +204,7 @@ def _parse_response(raw: str, doc_type: str, risk_assessment: Optional[dict] = N
 
 
 _NUMBER_WORD = re.compile(r"\b[a-z]+(?:-[a-z]+)? \((\d+)\)")
-_QUANTITY = re.compile(r"(\d+(?:\.\d+)?)\s*-?\s*(%|percent|hours?|hrs?|days?|business days|weeks?|months?|years?|crores?|lakhs?)\b")
+_QUANTITY = re.compile(r"(\d+(?:\.\d+)?)\s*-?\s*(%|percent|hours?|hrs?|days?|business days|weeks?|months?|years?|crores?|lakhs?)(?![a-z])")
 _SECTION = re.compile(r"\b(?:sec(?:tion)?s?\.?|s\.|ss\.|rule)\s*(\d+[a-z]?)", re.IGNORECASE)
 _CONCEPTS = {
     "cloud": r"\bcloud\b", "saas": r"\bsaas\b", "uptime": r"\buptime\b|\bavailability\b",
@@ -248,6 +251,101 @@ def _keep_grounded_text(text: str, facts: tuple[set, set, set]) -> str:
     return " ".join(s for s in sentences if s and _is_grounded(s, facts))
 
 
+_CLAUSE_HEADING = re.compile(r"^(\d+[A-Z]?)\.\s+([A-Z][A-Za-z ,&/'\-]{2,70})$")
+_BOILERPLATE = ("definition", "interpretation", "general", "counterpart", "notice", "entire agreement", "severab", "recital", "background")
+
+
+def _clause_digest(text: str, limit: int = 15) -> list[str]:
+    lines = [l.strip() for l in text.splitlines()]
+    items = []
+    for i, line in enumerate(lines):
+        m = _CLAUSE_HEADING.match(line)
+        if not m or len(m.group(2).split()) > 8 or any(b in m.group(2).lower() for b in _BOILERPLATE):
+            continue
+        body = next((l for l in lines[i + 1:i + 3] if l and not _CLAUSE_HEADING.match(l)), "")
+        if not body:
+            continue
+        first = re.split(r"(?<=[.;])\s+(?=[A-Z0-9])", body)[0]
+        first = re.sub(r"^\d+[A-Z]?(\.\d+)*\s+", "", first)
+        if len(first) > 220:
+            first = first[:220].rsplit(" ", 1)[0] + "…"
+        name = m.group(2).title() if m.group(2).isupper() else m.group(2)
+        items.append(f"{name} (cl. {m.group(1)}): {first}")
+        if len(items) >= limit:
+            break
+    return items
+
+
+_SUBCLAUSE = re.compile(r"^(\d+[A-Z]?(?:\.\d+)*)\.?\s+(.+)$")
+_SHALL = re.compile(r"((?:the |each |either |neither )?[A-Z][A-Za-z'’ ]{1,40}?)\s+(?:shall|must|may not)\b")
+
+
+def _clause_texts(text: str) -> dict:
+    clauses, current = {}, None
+    for line in text.splitlines():
+        line = line.strip()
+        heading = _CLAUSE_HEADING.match(line)
+        if heading:
+            current = heading.group(1)
+            continue
+        sub = _SUBCLAUSE.match(line)
+        if sub and not heading:
+            current = sub.group(1)
+            line = sub.group(2)
+        if current and line:
+            clauses[current] = (clauses.get(current, "") + " " + line).strip()
+    return clauses
+
+
+def _subject(clause_text: str) -> str:
+    m = _SHALL.search(clause_text)
+    return m.group(1).split()[-1].lower() if m else ""
+
+
+def _wrong_parties(items: list[str], clauses: dict) -> bool:
+    checked = wrong = 0
+    for item in items:
+        num = re.search(r"cl\.\s*(\d+[A-Z]?(?:\.\d+)*)", item)
+        if not num or ":" not in item:
+            continue
+        subject = _subject(clauses.get(num.group(1), ""))
+        if not subject or subject in ("party", "parties"):
+            continue
+        checked += 1
+        if subject not in item.split(":", 1)[0].lower():
+            wrong += 1
+    return checked > 0 and wrong * 2 >= checked
+
+
+def _party_in_text(item: str, text: str) -> bool:
+    if ":" not in item:
+        return True
+    label = re.sub(r"\(.*?\)", "", item.split(":", 1)[0]).strip()
+    words = [w for w in re.findall(r"[A-Za-z]{3,}", label) if w.lower() not in ("the", "and", "each", "both", "party", "parties")]
+    return not words or any(w.lower() in text.lower() for w in words)
+
+
+def _obligation_digest(text: str, limit: int = 14) -> list[str]:
+    items = []
+    for num, body in _clause_texts(text).items():
+        sentence = next((s for s in re.split(r"(?<=[.;])\s+(?=[A-Z])", body) if re.search(r"\b(shall|must)\b", s)), "")
+        if not sentence or re.search(r"\bmeans\b|shall have the meaning|\bincludes?\b", sentence):
+            continue
+        if len(sentence) > 220:
+            sentence = sentence[:220].rsplit(" ", 1)[0] + "…"
+        items.append(f"{sentence} (cl. {num})")
+        if len(items) >= limit:
+            break
+    return items
+
+
+def _names_only(items: list[str]) -> bool:
+    if not items:
+        return True
+    short = sum(1 for i in items if len(i.split(":", 1)[-1].split()) < 5)
+    return short >= len(items) / 2
+
+
 def _ground(result: dict, source_text: str, risk_assessment: Optional[dict]) -> dict:
     doc_facts = _facts(source_text)
     findings = findings_for_prompt(risk_assessment) if risk_assessment else ""
@@ -262,8 +360,16 @@ def _ground(result: dict, source_text: str, risk_assessment: Optional[dict]) -> 
     summary = _keep_grounded_text(result.get("summary", ""), doc_facts)
     result["summary"] = summary or (f"This document is a {title}." if title else result.get("summary", ""))
     result["clauses"] = _keep_grounded(result.get("clauses", []), doc_facts)
-    result["obligations"] = _keep_grounded(result.get("obligations", []), doc_facts)
+    if _names_only(result["clauses"]):
+        result["clauses"] = _clause_digest(source_text) or result["clauses"]
+    result["obligations"] = [o for o in _keep_grounded(result.get("obligations", []), doc_facts) if _party_in_text(o, source_text)]
+    if not result["obligations"] or _wrong_parties(result["obligations"], _clause_texts(source_text)):
+        result["obligations"] = _obligation_digest(source_text) or result["obligations"]
+    result["critical_risks"] = re.sub(r"\b[RF]\d{1,2}\b:?\s*", "", result.get("critical_risks", ""))
     result["critical_risks"] = _keep_grounded_text(result.get("critical_risks", ""), all_facts)
+    if re.search(r"no monetary cap|no upper limit|uncapped", findings):
+        parts = re.split(r"(?<=[.;])\s+", result["critical_risks"])
+        result["critical_risks"] = " ".join(p for p in parts if not re.search(r"(?<!un)\bcapped\b", p) or re.search(r"\b(no|not|un)\b", p))
 
     lines = _compliance_lines(risk_assessment)
     explanation = _keep_grounded_text(result.get("compliance", ""), all_facts)

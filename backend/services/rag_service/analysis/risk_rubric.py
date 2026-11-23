@@ -1,7 +1,7 @@
 import re
 from typing import Optional
 
-RUBRIC_VERSION = "1.5"
+RUBRIC_VERSION = "1.6"
 
 STATUS_FACTOR = {"GAP": 1.0, "PARTIAL": 0.5, "COMPLIANT": 0.0}
 
@@ -70,7 +70,7 @@ RISK_CHECKLIST: list[dict] = [
             r"liability.{0,160}(shall not exceed|not exceed|limited to|capped at|cap of|maximum of|in excess of)",
             r"(aggregate|total|maximum|cumulative) liability",
         ],
-        "weak": [r"limitation of liability", r"(indirect|consequential|special) (damages|loss)", r"\bliab(le|ility)\b"],
+        "weak": [r"no cap on.{0,40}liabilit", r"liabilit.{0,60}(is|shall be) (not limited|uncapped)", r"limitation of liability", r"(indirect|consequential|special) (damages|loss)", r"\bliab(le|ility)\b"],
         "gap_text": "liability is not addressed, leaving exposure uncapped",
         "partial_text": "liability is mentioned but no monetary cap is set",
     },
@@ -588,8 +588,8 @@ def assess_risk(text: str) -> dict:
 def findings_for_prompt(assessment: dict) -> str:
     lines = [f"Rule-based risk score: {assessment['risk_score']}/100 ({assessment['risk_band']} risk)."]
     for f in assessment.get("red_flags", []):
-        lines.append(f"- {f['id']} {f['title']} [RED FLAG, {f['severity']}]: {f['finding']} ({f['law']})")
+        lines.append(f"- {f['title']} [unfair clause, {f['severity']}]: {f['finding']} ({f['law']})")
     for c in assessment["risk_checklist"]:
         if c["status"] in ("GAP", "PARTIAL"):
-            lines.append(f"- {c['id']} {c['title']} [{c['status']}]: {c['finding']} ({c['law']})")
+            lines.append(f"- {c['title']} [{'missing' if c['status'] == 'GAP' else 'partly addressed'}]: {c['finding']} ({c['law']})")
     return "\n".join(lines)
