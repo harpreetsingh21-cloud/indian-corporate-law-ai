@@ -405,36 +405,108 @@ def _obligation_digest(text: str, limit: int = 14) -> list[str]:
 
 
 _KEY_TERM_PATTERNS = [
+    r"\b(continues? for|remain in force for|for a period of|begins on)\b",
+    r"\b(terminate|end this agreement)\b.{0,80}\bnotice\b",
+    r"\b(total|aggregate) (aggregate )?liability\b.{0,120}\bnot exceed\b",
+    r"\bgoverned by the laws? of\b",
+    r"\bseat (and venue )?of (the )?arbitration\b",
     r"\bsurvive",
     r"\bwithin\s+\S+\s+\(\d+\)\s+hours\b",
     r"\bwithin\s+\S+\s+\(\d+\)\s+(days|business days)\b",
-    r"\b(continues? for|remain in force for|for a period of|begins on)\b",
-    r"\b(terminate|end this agreement)\b.{0,80}\bnotice\b",
-    r"\bgoverned by the laws? of\b",
 ]
+_DEPENDENT = re.compile(r"\b(do so|such failure|the same|thereof|aforesaid)\b|^(It|They|These|Those|Such)\s", re.IGNORECASE)
 
 
-def _key_terms(text: str, summary: str, limit: int = 3) -> list[str]:
+def _key_terms(text: str, summary: str, limit: int = 5, target_words: int = 150) -> list[str]:
     sentences = [s.strip() for s in re.split(r"(?<=[.;])\s+(?=[A-Z0-9])|\n", text) if 40 <= len(s.strip()) <= 260]
     seen_words = _words(summary)
     seen_quantities = _facts(summary)[0]
     picked = []
+    total = len(summary.split())
     for pattern in _KEY_TERM_PATTERNS:
+        if len(picked) >= limit or total >= target_words:
+            break
         for sentence in sentences:
-            if sentence in picked or not re.search(pattern, sentence, re.IGNORECASE) or re.search(r"\bmeans\b", sentence):
+            clean = re.sub(r"^\d+[A-Z]?(\.\d+)*\s+", "", sentence)
+            if sentence in picked or not re.search(pattern, sentence, re.IGNORECASE) or re.search(r"\bmeans\b", sentence) or _DEPENDENT.search(clean):
                 continue
             quantities = _facts(sentence)[0]
             if quantities and quantities <= seen_quantities:
                 continue
-            if len(_words(sentence) - seen_words) < 4:
+            if len(_words(sentence) - seen_words) < max(1, min(4, len(_words(sentence)) // 2)):
                 continue
             picked.append(sentence)
             seen_words |= _words(sentence)
             seen_quantities |= quantities
-            break
-        if len(picked) >= limit:
+            total += len(clean.split())
             break
     return [re.sub(r"^\d+[A-Z]?(\.\d+)*\s+", "", p) for p in picked]
+
+
+_NAME_WITH_ROLE = re.compile(r"\b((?:[A-Z][a-z]+ ){0,2}[A-Z][a-z]+)\s*\(([A-Z][a-z]+(?: [A-Z][a-z]+)?)\)")
+
+
+def _defined(word: str, source: str) -> bool:
+    return bool(re.search(rf'["“]{re.escape(word)}["”]', source)) or bool(re.search(rf"\b{re.escape(word)}\b", source))
+
+
+def _fix_role_names(text: str, source: str) -> str:
+    aliases = {}
+
+    def replace(m):
+        name, role = m.group(1), m.group(2)
+        if _defined(role, source):
+            return m.group(0)
+        if _defined(name, source):
+            aliases[role] = name
+        return name
+
+    text = _NAME_WITH_ROLE.sub(replace, text or "")
+    for role, name in aliases.items():
+        text = re.sub(rf"\b{re.escape(role)}\b", name, text)
+    return text
+
+
+def _digits(text: str) -> set:
+    lower = _NUMBER_WORD.sub(r"\1", text.lower())
+    lower = re.sub(r"\bcl(?:ause)?s?\.?\s*\d+[a-z]?(?:\.\d+)*(?:\([a-z0-9]+\))?", " ", lower)
+    return set(re.findall(r"(?<![\d.])\d+(?![\d.])", lower))
+
+
+_PARTY = re.compile(r"((?:[A-Z][A-Za-z&.'\-]*\s+){1,8}?(?:PRIVATE LIMITED|Private Limited|LIMITED|Limited|LLP|Pvt\.? Ltd\.?|Inc\.?))[^\"“]{0,700}?\((?:hereinafter (?:referred to as |called )?)?(?:the )?[\"“]([A-Z][A-Za-z ]{1,30})[\"”]")
+
+
+def _parties_sentence(source: str, summary: str) -> str:
+    parties = []
+    for m in _PARTY.finditer(source[:5000]):
+        name, role = re.sub(r"^(?:(?:and|by|between)\s+)+", "", " ".join(m.group(1).split()), flags=re.IGNORECASE), m.group(2).strip()
+        name = name.title() if name.isupper() else name
+        if role not in [r for _, r in parties]:
+            parties.append((name, role))
+        if len(parties) == 2:
+            break
+    if len(parties) < 2 or parties[0][0].split()[0].lower() in summary.lower():
+        return ""
+    named = [name if role.lower() in name.lower() else f"{name} (the {role})" for name, role in parties]
+    return f"The parties are {named[0]} and {named[1]}."
+
+
+def _summary_sentence_ok(sentence: str, source: str, clauses: dict) -> bool:
+    lower = sentence.lower()
+    law = re.search(r"governed by[^.]{0,60}?laws? of (?:the )?([A-Z][a-z]+(?: [A-Z][a-z]+)?)", source)
+    if law and re.search(r"governing law|governed by", lower) and law.group(1).lower() not in lower:
+        return False
+    cited = [n for n in re.findall(r"\bcl(?:ause)?\.?\s*(\d+[A-Z]?(?:\.\d+)*)", sentence, re.IGNORECASE) if n in clauses]
+    if cited:
+        allowed = set().union(*(_digits(clauses[n]) | set(n.split(".")) for n in cited))
+        if not _digits(sentence) <= allowed:
+            return False
+    if "convenience" in lower:
+        holders = {h.lower() for h in re.findall(r"\b(?:[Tt]he )?([A-Z][A-Za-z]+(?: [A-Z][a-z]+)?) may terminate[^.]{0,80}for convenience", source)}
+        part = next((p for p in re.split(r",|;|\bbut\b", lower) if "convenience" in p), lower)
+        if holders and not any(h in part for h in holders):
+            return False
+    return True
 
 
 def _names_only(items: list[str]) -> bool:
@@ -470,18 +542,24 @@ def _ground(result: dict, source_text: str, risk_assessment: Optional[dict]) -> 
     if title:
         result["document_type"] = title
 
-    summary = _keep_grounded_text(result.get("summary", ""), doc_facts)
+    clause_map = _clause_texts(source_text)
+    summary = _keep_grounded_text(_fix_role_names(result.get("summary", ""), source_text), doc_facts)
+    sentences = re.split(r"(?<=[.!?])\s+(?=[A-Z])", summary)
+    sentences = [x for x in sentences if x and _summary_sentence_ok(x, source_text, clause_map)]
+    parties = _parties_sentence(source_text, " ".join(sentences))
+    if parties:
+        sentences.insert(1 if sentences else 0, parties)
+    summary = " ".join(sentences)
     summary = summary or (f"This document is a {title}." if title else result.get("summary", ""))
     if len(summary.split()) < 120:
         extra = _key_terms(source_text, summary)
         if extra:
             summary = "\n".join([summary] + extra)
     result["summary"] = summary
-    clause_map = _clause_texts(source_text)
     result["clauses"] = _fix_clause_numbers(_keep_grounded(result.get("clauses", []), doc_facts), clause_map)
     if _names_only(result["clauses"]):
         result["clauses"] = _clause_digest(source_text) or result["clauses"]
-    result["obligations"] = [o for o in _keep_grounded(result.get("obligations", []), doc_facts) if _party_in_text(o, source_text)]
+    result["obligations"] = [_fix_role_names(o, source_text) for o in _keep_grounded(result.get("obligations", []), doc_facts) if _party_in_text(o, source_text)]
     result["obligations"] = _fix_clause_numbers(_add_clause_numbers(result["obligations"], clause_map), clause_map)
     if _is_mutual(source_text):
         result["obligations"] = _drop_names_from_roles(result["obligations"])
