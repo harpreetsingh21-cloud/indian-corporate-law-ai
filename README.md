@@ -167,53 +167,82 @@ LegalBuddy operates on a **True Microservices Architecture**. Each service runs 
 
 ```
 backend/
-├── shared/                              # Shared library imported across services
+├── shared/                                   # Shared library imported across services
+│   ├── __init__.py
 │   ├── config/
-│   │   └── settings.py                  # Environment-driven configuration
+│   │   ├── __init__.py
+│   │   └── settings.py                       # Environment-driven configuration
 │   ├── database/
-│   │   ├── mongo.py                     # Motor async client & database connection
-│   │   ├── user_repo.py                 # User & Admin database operations
-│   │   └── document_repo.py             # Document storage and status lifecycle
+│   │   ├── __init__.py
+│   │   ├── mongo.py                          # Motor async client & database connection
+│   │   ├── user_repo.py                      # User & Admin database operations (limits, roles, Pro plan)
+│   │   └── document_repo.py                  # Document storage and status lifecycle
 │   ├── providers/
-│   │   ├── llm.py                       # Ollama LLM provider interface
-│   │   ├── embedding.py                 # SentenceTransformer embeddings
-│   │   └── vector_store.py              # FAISS vector store managers
+│   │   ├── __init__.py
+│   │   ├── llm.py                            # Ollama LLM provider (Qwen3 1.7B, context size, seed, timeout)
+│   │   ├── embedding.py                      # SentenceTransformer embeddings
+│   │   └── vector_store.py                   # FAISS vector store managers (global law index + per-document)
 │   ├── security/
-│   │   └── jwt.py                       # JWT token creation and validation
+│   │   ├── __init__.py
+│   │   └── jwt.py                            # JWT token creation and validation
 │   └── storage/
-│       └── provider.py                  # Local disk storage abstractions
+│       ├── __init__.py
+│       └── provider.py                       # Local disk storage abstractions
 │
 ├── services/
-│   ├── api_gateway/                     ← PORT 5000 (Primary Entrypoint)
-│   │   ├── main.py                      # Gateway reverse proxy + CORS management
-│   │   └── Dockerfile
+│   ├── __init__.py
 │   │
-│   ├── auth_service/                    ← PORT 8001
-│   │   ├── main.py                      # Auth FastAPI application
-│   │   ├── router.py                    # Auth, Google OAuth & User Admin endpoints
-│   │   ├── service.py                   # Business logic for auth, registration & users
-│   │   └── notification/service.py      # Notification dispatcher
+│   ├── api_gateway/                          ← PORT 5000 (Primary Entrypoint)
+│   │   ├── __init__.py
+│   │   └── main.py                           # Gateway reverse proxy + CORS management
 │   │
-│   ├── document_service/                ← PORT 8002
-│   │   ├── main.py                      # Document management FastAPI app
-│   │   ├── router.py                    # Upload, stream, delete & reset endpoints
-│   │   └── service.py                   # Storage, validation & file streaming
+│   ├── auth_service/                         ← PORT 8001
+│   │   ├── __init__.py
+│   │   ├── main.py                           # Auth FastAPI application (auth + payment routers)
+│   │   ├── router.py                         # Signup/login, Google OAuth, admin OTP, profile & user admin endpoints
+│   │   ├── payment_router.py                 # PhonePe Standard Checkout v2: create-order & payment status
+│   │   ├── service.py                        # Business logic for auth, registration & users
+│   │   └── notification/
+│   │       ├── __init__.py
+│   │       └── service.py                    # Notification dispatcher (email / OTP)
 │   │
-│   └── rag_service/                     ← PORT 8003
-│       ├── main.py                      # RAG pipeline FastAPI app
-│       ├── router.py                    # /summarize, /result & /cancel endpoints
-│       ├── service.py                   # Ingestion orchestrator & LLM prompt caller
-│       ├── extraction.py                # Extract text from PDF and Word documents
-│       ├── analysis/prompts.py          # Structured prompt engineering & JSON schema parser
-│       └── ingestion_worker/tasks.py    # Background task executor
+│   ├── document_service/                     ← PORT 8002
+│   │   ├── __init__.py
+│   │   ├── main.py                           # Document management FastAPI app
+│   │   ├── router.py                         # Upload (PDF/DOC/DOCX/TXT), list, stream, delete & reset endpoints
+│   │   └── service.py                        # Storage, validation & file streaming
+│   │
+│   └── rag_service/                          ← PORT 8003
+│       ├── __init__.py
+│       ├── main.py                           # RAG pipeline FastAPI app
+│       ├── router.py                         # /summarize (?force=true to re-analyse), /result & /cancel endpoints
+│       ├── service.py                        # Analysis orchestrator: extract → risk rubric → retrieve → LLM → parse
+│       ├── extraction.py                     # Extract & clean text from PDF, Word and TXT documents
+│       ├── analysis/
+│       │   ├── __init__.py
+│       │   ├── prompts.py                    # Strict prompt engineering, JSON parser & grounding checks
+│       │   └── risk_rubric.py                # Rule-based risk score (R1–R12 checks, F1–F22 red flags)
+│       └── ingestion_worker/
+│           ├── __init__.py
+│           └── tasks.py                      # Background task executor (with cancel check)
 │
 ├── scripts/
-│   ├── build_index.py                   # Generates global FAISS index from IT corporate law
-│   └── __init__.py
+│   ├── __init__.py
+│   └── build_index.py                        # Generates global FAISS index from IT corporate law
 │
-├── run_dev.py                           # Cross-platform development service runner
-├── requirements.txt                     # Backend Python dependencies
-└── .env.example                         # Reference environment variables
+├── output/                                   # Prebuilt law knowledge base (created by build_index.py)
+│   ├── companies_act_dataset.json            # Act sections as structured data
+│   ├── raw_text.txt                          # Extracted Act text
+│   ├── section_titles.json                   # Section titles
+│   ├── embeddings.npy                        # Section embeddings
+│   ├── faiss_index.bin                       # FAISS vector index
+│   └── metadata.pkl                          # Index metadata
+│
+├── uploads/                                  # Uploaded user documents (created at runtime)
+├── act.pdf                                   # Source law PDF used to build the index
+├── run_dev.py                                # Cross-platform development service runner
+├── requirements.txt                          # Backend Python dependencies
+└── .env.example                              # Reference environment variables
 ```
 
 ---
@@ -222,56 +251,134 @@ backend/
 
 ```
 frontend/
+├── public/                                   # Static files served as-is
+│   ├── legalbuddy-logo.png                   # App logo (PNG)
+│   ├── legalbuddy-logo-1024.png              # Large logo (social / preview)
+│   ├── legalbuddy-logo.svg                   # App logo (vector)
+│   ├── favicon.svg                           # Browser tab icon
+│   ├── icons.svg
+│   ├── vite.svg
+│   ├── Case_Law_Analysis_Template.pdf        # Sample legal documents
+│   ├── Compliance_Checklist.pdf
+│   ├── Contract_Review_Guidelines.pdf
+│   ├── Employment_Law_Guide.pdf
+│   └── Intellectual_Property_Rights.pdf
+│
 ├── src/
-│   ├── core/                            # Application framework & layouts
-│   │   ├── App.jsx                      # Root gate (Auth checks & routing)
-│   │   ├── LayoutView.jsx               # App wrapper with responsive sidebars & topbars
-│   │   └── SidebarView.jsx              # Navigation, user quota meter & theme toggle
+│   ├── main.jsx                              # React entry point (BrowserRouter, payment-done route)
+│   ├── index.css                             # TailwindCSS design tokens & themes
+│   │
+│   ├── assets/
+│   │   ├── legalbuddy-logo.png
+│   │   └── legalbuddy-logo.svg               # Brand vector asset
+│   │
+│   ├── core/                                 # Application framework & layouts
+│   │   ├── App.jsx                           # Root gate (auth checks & routing)
+│   │   ├── LayoutView.jsx                    # Page switcher with sidebar, top bar & quick tour
+│   │   ├── SidebarView.jsx                   # Navigation, user quota meter & theme toggle
+│   │   └── TopBarView.jsx                    # Breadcrumb & user badge
 │   │
 │   ├── features/
-│   │   ├── auth/                        # Authentication & onboarding
-│   │   │   ├── views/
-│   │   │   │   ├── UserLoginView.jsx    # User login & signup with Google OAuth
-│   │   │   │   ├── AdminLoginView.jsx   # Dedicated administrator portal
-│   │   │   │   └── LoginView.jsx        # Unified dispatcher
-│   │   │   └── models/authStore.js      # Session & credentials state
+│   │   ├── auth/                             # Authentication
+│   │   │   ├── models/
+│   │   │   │   └── authStore.js              # Session, token & user state (Zustand)
+│   │   │   └── views/
+│   │   │       ├── LoginView.jsx             # Unified dispatcher
+│   │   │       ├── UserLoginView.jsx         # User login & signup with Google OAuth & reCAPTCHA
+│   │   │       └── AdminLoginView.jsx        # Administrator portal with email OTP
 │   │   │
-│   │   ├── onboarding/
-│   │   │   └── QuickTourModal.jsx       # Guided interactive onboarding tour
+│   │   ├── dashboard/
+│   │   │   ├── intents/
+│   │   │   │   └── useGreeting.js            # Time-based greeting
+│   │   │   └── views/
+│   │   │       └── DashboardView.jsx         # Main hub, statistics & quick upload
+│   │   │
+│   │   ├── documents/                        # Document analysis suite
+│   │   │   ├── intents/
+│   │   │   │   ├── useAnalysisPolling.js
+│   │   │   │   ├── useDocumentFetch.js
+│   │   │   │   └── useFileUpload.js
+│   │   │   ├── models/
+│   │   │   │   └── fileStore.js              # Files, active document & analysis result (Zustand)
+│   │   │   └── views/
+│   │   │       ├── DocumentsView.jsx         # Upload, document library & 6 analysis tabs
+│   │   │       │                             #   (Preview, Summary, Clauses, Objectives, Risk, Compliance),
+│   │   │       │                             #   live polling, Stop / Retry / Re-analyse
+│   │   │       ├── FileViewerView.jsx        # Document preview (PDF, DOCX, TXT)
+│   │   │       ├── PDFViewerView.jsx         # PDF viewer component
+│   │   │       ├── AnalysisResultView.jsx
+│   │   │       ├── DocumentFilesView.jsx
+│   │   │       ├── RecentFilesView.jsx
+│   │   │       ├── SampleDocumentsView.jsx
+│   │   │       └── UploadAreaView.jsx
 │   │   │
 │   │   ├── profile/
 │   │   │   └── views/
-│   │   │       ├── ProfilePageView.jsx  # User account & organization profile
-│   │   │       └── UserProfileModal.jsx # Quick profile edit modal
+│   │   │       ├── ProfilePageView.jsx       # User account, organization profile & upload quota
+│   │   │       ├── UpgradeButton.jsx         # Pro plan upgrade with PhonePe checkout
+│   │   │       ├── PaymentDoneView.jsx       # Payment confirmation after PhonePe redirect
+│   │   │       └── UserProfileModal.jsx
 │   │   │
-│   │   ├── documents/                   # Document analysis suite
-│   │   │   ├── views/
-│   │   │   │   ├── DocumentsView.jsx    # Risk Score, clauses & compliance display
-│   │   │   │   └── UploadAreaView.jsx   # Drag & drop file upload with size checks
-│   │   │   └── models/fileStore.js      # Document state & real-time polling
+│   │   ├── admin/                            # Platform administration
+│   │   │   └── views/
+│   │   │       ├── AdminPanelView.jsx        # Admin console container
+│   │   │       ├── AdminOverviewView.jsx     # Platform statistics
+│   │   │       ├── AdminUsersView.jsx        # User management table
+│   │   │       ├── AdminUserDetailView.jsx   # Individual user audit & quota reset
+│   │   │       ├── AdminAgentsView.jsx
+│   │   │       └── AdminAgentDetailView.jsx
 │   │   │
-│   │   ├── dashboard/
-│   │   │   └── views/DashboardView.jsx  # Main hub, quick statistics & recent uploads
-│   │   │
-│   │   └── admin/                       # Platform administration
-│   │       └── views/
-│   │           ├── AdminPanelView.jsx   # Admin overview dashboard
-│   │           ├── AdminUsersView.jsx   # User management table & approvals
-│   │           └── AdminUserDetailView.jsx # Individual user audit & quota reset
+│   │   └── onboarding/
+│   │       └── QuickTourModal.jsx            # Guided interactive onboarding tour
 │   │
 │   ├── shared/
-│   │   ├── ui/
-│   │   │   └── LegalBuddyLogo.jsx       # Custom brand SVG emblem & typography
 │   │   ├── utils/
-│   │   │   └── api.js                   # Unified API client (supports VITE_API_URL)
-│   │   └── store/uiStore.js             # Theme (Dark/Light) & page state
+│   │   │   ├── api.js                        # Unified API client (supports VITE_API_URL)
+│   │   │   ├── storage.js                    # localStorage helpers
+│   │   │   ├── index.js
+│   │   │   └── sampleDocuments.js
+│   │   ├── store/
+│   │   │   └── uiStore.js                    # Theme (Dark/Light) & page state
+│   │   └── ui/
+│   │       ├── LegalBuddyLogo.jsx            # Custom brand SVG emblem & typography
+│   │       ├── Loader.jsx                    # Loading spinners & skeletons
+│   │       ├── index.jsx
+│   │       ├── CustomCheckbox.jsx
+│   │       ├── CustomSelect.jsx
+│   │       ├── FeatureCard.jsx
+│   │       ├── HeroSection.jsx
+│   │       ├── ListSection.jsx
+│   │       ├── StatCard.jsx
+│   │       ├── TabButton.jsx
+│   │       ├── TabSection.jsx
+│   │       └── TextViewer.jsx
 │   │
-│   ├── assets/legalbuddy-logo.svg       # Brand vector asset
-│   └── index.css                        # TailwindCSS design tokens & themes
+│   ├── components/
+│   │   ├── AnalysisResult.jsx
+│   │   ├── BackendStatus.jsx
+│   │   ├── DocumentFiles.jsx
+│   │   ├── Header.jsx
+│   │   ├── HeroSection.jsx
+│   │   ├── PDFViewer.jsx
+│   │   ├── RecentFiles.jsx
+│   │   ├── SampleDocuments.jsx
+│   │   ├── TabSection.jsx
+│   │   └── UploadArea.jsx
+│   │
+│   └── utils/
+│       ├── sampleDocuments.js
+│       └── storage.js
 │
-├── vercel.json                          # Production deployment & SPA rewrites configuration
-├── vite.config.js                       # Vite bundler build settings
-└── .env.example                         # Frontend environment variables template
+├── index.html                                # Vite HTML entry
+├── package.json                              # Dependencies & scripts
+├── package-lock.json
+├── vite.config.js                            # Vite bundler build settings
+├── vercel.json                               # Production deployment & SPA rewrites configuration
+├── eslint.config.js                          # Lint rules
+├── refactor.py
+├── .env.example                              # Frontend environment variables template
+├── .gitignore
+└── README.md
 ```
 
 ---
