@@ -630,6 +630,8 @@ def _ground(result: dict, source_text: str, risk_assessment: Optional[dict]) -> 
     if re.search(r"no monetary cap|no upper limit|uncapped", findings):
         parts = re.split(r"(?<=[.;])\s+", result["critical_risks"])
         result["critical_risks"] = " ".join(p for p in parts if not re.search(r"(?<!un)\bcapped\b", p) or re.search(r"\b(no|not|un)\b", p))
+    if risk_assessment and not risk_assessment.get("risks"):
+        result["critical_risks"] = "No risks were found (risk score 0%). All checked protections are present in the contract and no unfair or one-sided clauses were detected."
 
     lines = _compliance_lines(risk_assessment)
     explanation = _keep_grounded_text(result.get("compliance", ""), all_facts)

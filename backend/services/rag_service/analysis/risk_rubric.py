@@ -251,7 +251,7 @@ def _status(item: dict, text: str) -> tuple[str, str]:
 
 SEVERITY_POINTS = {"Critical": 15, "High": 10, "Medium": 5, "Low": 3}
 
-RESIDUAL_RISK = 5
+RESIDUAL_RISK = 0
 
 _PARTY = r"(vendor|service provider|supplier|contractor|licensor|developer|consultant|company|client|customer|licensee|employee)"
 
