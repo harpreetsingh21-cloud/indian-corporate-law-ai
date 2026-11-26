@@ -34,3 +34,12 @@ __pycache__/
 run_all.py
 create_admin.py
 start_all.ps1
+
+# Research: private or temporary files
+*_backup.py
+*keep_private*
+research_test/eval/
+research_test/eval.zip
+research_test/LegalBuddy_*.zip
+research_test/results/
+research_test/results.zip
